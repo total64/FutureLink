@@ -1,0 +1,25 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  margin: 0;
+  background: #f4faf7;
+  color: #173028;
+}
+
+button, input, select, textarea {
+  font: inherit;
+}
+
+.field {
+  @apply w-full rounded-xl border border-line bg-white px-3.5 py-3 text-[15px] outline-none transition;
+}
+
+.field:focus {
+  border-color: #18b87d;
+}
+
+.label {
+  @apply mb-1.5 block text-sm text-ink/80;
+}

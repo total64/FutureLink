@@ -8,7 +8,10 @@ export function validate(schema) {
       params: req.params,
     })
     if (!parsed.success) {
-      const message = parsed.error.issues[0]?.message || 'Check the form and try again.'
+      const issue = parsed.error.issues[0]
+      const field = (issue?.path || []).filter((part) => part !== 'body' && part !== 'query' && part !== 'params').join('.')
+      const raw = issue?.message || 'Check the form and try again.'
+      const message = field && raw.startsWith('String must') ? `${field}: ${raw}` : raw
       return fail(res, 400, 'VALIDATION', message)
     }
     req.valid = parsed.data

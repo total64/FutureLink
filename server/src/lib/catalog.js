@@ -50,6 +50,8 @@ export function publicOpportunity(opportunity, extra = {}) {
     audience: opportunity.audience,
     requiredSkills: opportunity.requiredSkills,
     location: opportunity.location,
+    latitude: opportunity.latitude ?? null,
+    longitude: opportunity.longitude ?? null,
     workMode: opportunity.workMode,
     compensation: opportunity.compensation,
     duration: opportunity.duration,

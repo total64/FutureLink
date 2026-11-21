@@ -126,7 +126,7 @@ export default function Discover() {
         <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
           <div>
             <p className="font-medium">Where they are held</p>
-            <p className="text-sm text-ink/60">Choose a place on the map to show internships and events held there.</p>
+            <p className="text-sm text-ink/60">Each pin is the exact place an organizer marked. Choose one to see what is held there.</p>
           </div>
           {(near || held) && (
             <button className="rounded-full bg-mint px-3 py-1.5 text-sm" onClick={() => { setNear(''); setNearLabel(''); setHeld('') }}>
@@ -138,10 +138,8 @@ export default function Discover() {
           <>
             <PlaceMap
               pins={places.data.pins}
-              selected={nearLabel}
-              onSelect={(name) => {
-                const pin = places.data.pins.find((item) => item.name === name)
-                if (!pin) return
+              selected={near}
+              onSelect={(pin) => {
                 setNear(`${pin.lat},${pin.lng}`)
                 setNearLabel(pin.name)
                 setHeld('')
@@ -152,7 +150,7 @@ export default function Discover() {
               {places.data.pins.map((pin) => (
                 <button
                   key={`${pin.lat},${pin.lng}`}
-                  className={`rounded-full px-3 py-1.5 text-sm ${nearLabel === pin.name ? 'bg-brand text-white' : 'bg-paper'}`}
+                  className={`rounded-full px-3 py-1.5 text-sm ${near === `${pin.lat},${pin.lng}` ? 'bg-brand text-white' : 'bg-paper'}`}
                   onClick={() => { setNear(`${pin.lat},${pin.lng}`); setNearLabel(pin.name); setHeld(''); setLocation('') }}
                 >
                   {pin.name} · {pin.internships + pin.events}
@@ -169,7 +167,7 @@ export default function Discover() {
               <button
                 key={place.location}
                 className={`rounded-full px-3 py-1.5 text-sm ${location === place.location ? 'bg-brand text-white' : 'bg-paper'}`}
-                onClick={() => { setLocation(place.location); setHeld('') }}
+                onClick={() => { setLocation(place.location); setHeld(''); setNear(''); setNearLabel('') }}
               >
                 {place.location}
               </button>

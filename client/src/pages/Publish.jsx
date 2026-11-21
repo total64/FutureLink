@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import Shell from '../components/Shell'
 import LocationPicker from '../components/LocationPicker'
+import SpotMap from '../components/SpotMap'
 import { api } from '../lib/api'
 import { ORGANIZER_TYPES, PAY_LABEL, WORK_LABEL } from '../lib/format'
 
@@ -48,16 +49,70 @@ function blankQuestion() {
 
 function PlaceField({ form, setForm, placed, setPlaced, error, label }) {
   const remote = form.workMode === 'REMOTE'
-  async function pick(lat, lng) {
+  const [matches, setMatches] = useState([])
+  const [searching, setSearching] = useState(false)
+  const [searchNote, setSearchNote] = useState('')
+
+  function placePin(lat, lng, name) {
     setPlaced(true)
-    let name = 'Selected place'
+    setMatches([])
+    setForm((current) => ({
+      ...current,
+      latitude: lat,
+      longitude: lng,
+      location: name || current.location,
+    }))
+  }
+
+  async function pick(lat, lng) {
+    let existing = ''
+    setForm((current) => {
+      existing = current.location
+      return { ...current, latitude: lat, longitude: lng }
+    })
+    setPlaced(true)
+    setMatches([])
+    if (existing.trim()) {
+      setSearchNote('Pin moved. The place name stays what you wrote.')
+      return
+    }
     try {
       const result = await api(`/opportunities/nearest?lat=${lat}&lng=${lng}`)
-      if (result.name) name = result.name
+      if (result.name) {
+        setForm((current) => (current.location.trim() ? current : { ...current, location: result.name }))
+        setSearchNote('Named from the map. Edit it if you want a more specific place.')
+      }
     } catch {
-      name = 'Selected place'
+      setSearchNote('Pin dropped. Name this place so students can read it.')
     }
-    setForm((current) => ({ ...current, latitude: lat, longitude: lng, location: name }))
+  }
+
+  async function findPlace() {
+    const query = form.location.trim()
+    if (query.length < 2) {
+      setSearchNote('Type the venue or neighborhood first.')
+      return
+    }
+    setSearching(true)
+    setSearchNote('')
+    setMatches([])
+    try {
+      const result = await api(`/opportunities/geocode?q=${encodeURIComponent(query)}`)
+      const places = result.places || []
+      if (places.length === 0) {
+        setSearchNote('No place matched that name. Click the map to drop a pin.')
+      } else if (places.length === 1) {
+        placePin(places[0].lat, places[0].lng, places[0].name)
+        setSearchNote('Pinned at this place. Drag the pin if the building is next door.')
+      } else {
+        setMatches(places)
+        setSearchNote('Choose the matching place.')
+      }
+    } catch (err) {
+      setSearchNote(err.message)
+    } finally {
+      setSearching(false)
+    }
   }
 
   if (remote) {
@@ -67,12 +122,36 @@ function PlaceField({ form, setForm, placed, setPlaced, error, label }) {
   return (
     <div>
       <p className="label">{label}</p>
-      <p className="mb-2 text-sm text-ink/60">Click the map where it is held. Students filter from this point.</p>
-      <LocationPicker latitude={placed ? form.latitude : null} longitude={placed ? form.longitude : null} onPick={pick} />
-      <label className="mt-3 block">
+      <p className="mb-2 text-sm text-ink/60">Type the venue or neighborhood, then find it on the map. Students see this exact pin.</p>
+      <label className="block">
         <span className="label">Place name</span>
-        <input className="field" value={form.location} onChange={(event) => setForm((current) => ({ ...current, location: event.target.value }))} placeholder="Shown on the listing" />
+        <span className="flex gap-2">
+          <input className="field" value={form.location} onChange={(event) => setForm((current) => ({ ...current, location: event.target.value }))} placeholder="Bole Atlas, Addis Ababa" />
+          <button type="button" className="shrink-0 rounded-xl border border-line px-3 text-sm" disabled={searching} onClick={findPlace}>{searching ? 'Finding…' : 'Find on map'}</button>
+        </span>
       </label>
+      {matches.length > 0 && (
+        <div className="mt-2 grid gap-2">
+          {matches.map((place) => (
+            <button
+              type="button"
+              key={`${place.lat},${place.lng}`}
+              className="rounded-xl border border-line px-3 py-2 text-left text-sm"
+              onClick={() => {
+                placePin(place.lat, place.lng, place.name)
+                setSearchNote('Pinned at this place. Drag the pin if the building is next door.')
+              }}
+            >
+              {place.name}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="mt-3">
+        <LocationPicker latitude={placed ? form.latitude : null} longitude={placed ? form.longitude : null} onPick={pick} />
+      </div>
+      {placed && <p className="mt-2 text-sm text-ink/60">Students will see this exact point on the map.</p>}
+      {searchNote && <p className="mt-1 text-sm text-ink/70">{searchNote}</p>}
       {error && <p className="mt-1 text-sm text-red-700">{error}</p>}
     </div>
   )
@@ -383,7 +462,10 @@ export default function Publish() {
           <p className="text-xs tracking-[0.14em] text-ink/40">LIVE PREVIEW</p>
           <p className="mt-3 text-xs">{ORGANIZER_TYPES[form.type]}</p>
           <h3 className="mt-1 font-display text-2xl">{form.title || (event ? 'Event title' : 'Internship title')}</h3>
-          <p className="mt-2 text-sm text-ink/60">{form.location} · {event ? { ONSITE: 'In person', REMOTE: 'Online', HYBRID: 'In person and online' }[form.workMode] : WORK_LABEL[form.workMode]}</p>
+          <p className="mt-2 text-sm text-ink/60">{form.location || 'Place not set'} · {event ? { ONSITE: 'In person', REMOTE: 'Online', HYBRID: 'In person and online' }[form.workMode] : WORK_LABEL[form.workMode]}</p>
+          {form.workMode !== 'REMOTE' && placed && form.latitude != null && (
+            <SpotMap latitude={form.latitude} longitude={form.longitude} label={form.location} />
+          )}
           <p className="mt-2 text-sm">{event ? (form.compensation === 'PAID' ? 'Paid ticket' : 'Free entry') : PAY_LABEL[form.compensation]}{form.duration ? ` · ${form.duration}` : ''}</p>
         </aside>
       </div>

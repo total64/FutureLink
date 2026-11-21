@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import Shell from '../components/Shell'
+import SpotMap from '../components/SpotMap'
 import { useAuth } from '../auth'
 import { api } from '../lib/api'
 import { PAY_LABEL, TYPE_BADGE, WORK_LABEL, formatDate } from '../lib/format'
@@ -64,6 +65,9 @@ export default function OpportunityDetail() {
               <p className="mt-2 text-sm text-ink/60">
                 {item.location} · {event ? attendance[item.workMode] : WORK_LABEL[item.workMode]} {item.duration ? `· ${item.duration}` : ''} · {event ? (item.compensation === 'PAID' ? 'Paid ticket' : 'Free entry') : PAY_LABEL[item.compensation]}
               </p>
+              {item.workMode !== 'REMOTE' && item.latitude != null && item.longitude != null && (
+                <SpotMap latitude={item.latitude} longitude={item.longitude} label={item.location} />
+              )}
               {event && item.startsAt && <p className="mt-2 text-sm">Starts {formatDate(item.startsAt)}</p>}
             </div>
             <button

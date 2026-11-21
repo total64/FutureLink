@@ -82,14 +82,14 @@ orgRouter.get('/me', async (req, res, next) => {
 
 const profileSchema = z.object({
   body: z.object({
-    name: z.string().trim().min(2, 'Enter the organization name.'),
-    description: z.string().trim().min(20, 'Describe the organization in a few sentences.'),
-    website: z.string().trim().max(200).optional(),
+    name: z.string().trim().min(2, 'Enter the organization name.').max(120, 'The organization name is too long.'),
+    description: z.string().trim().min(20, 'Describe the organization in a few sentences.').max(4000, 'The description is too long. Keep it under 4000 characters.'),
+    website: z.string().trim().max(500, 'The website link is too long.').optional(),
     contactEmail: z.string().trim().email('Enter a contact email.'),
-    phone: z.string().trim().min(7, 'Enter a phone number.').max(30),
-    location: z.string().trim().min(2, 'Enter a location.'),
-    logoUrl: z.string().trim().max(400).optional(),
-    industry: z.string().trim().max(80).optional(),
+    phone: z.string().trim().min(7, 'Enter a phone number.').max(30, 'The phone number is too long.'),
+    location: z.string().trim().min(2, 'Enter a location.').max(120, 'The location is too long.'),
+    logoUrl: z.string().trim().max(2000, 'The logo link is too long. Paste a normal image address.').optional(),
+    industry: z.string().trim().max(80, 'The industry is too long.').optional(),
   }),
 })
 

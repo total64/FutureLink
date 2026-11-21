@@ -9,7 +9,8 @@ import { scoreOpportunity } from '../services/recommend.js'
 import { closeExpired, openWhere } from '../lib/deadline.js'
 import { LIVE_TYPES } from '../services/plans.js'
 import { applicationFields, checkAnswers } from '../lib/applicationForm.js'
-import { clusterHeld, haversine, nearestCity } from '../lib/places.js'
+import { NEAR_KM, clusterHeld, haversine, nearestCity } from '../lib/places.js'
+import { reversePlace, searchPlaces } from '../lib/geocode.js'
 
 const listSchema = z.object({
   query: z.object({
@@ -34,7 +35,7 @@ function parseNear(value) {
   return { lat, lng }
 }
 
-function withinNear(row, near, radiusKm = 20) {
+function withinNear(row, near, radiusKm = NEAR_KM) {
   if (!near) return true
   const stored = row.latitude != null && row.longitude != null
   const lat = stored ? row.latitude : null
@@ -142,7 +143,7 @@ opportunityRouter.get('/places', async (req, res, next) => {
     await closeExpired(now)
     const rows = await prisma.opportunity.findMany({
       where: openWhere(now),
-      select: { location: true, type: true, latitude: true, longitude: true },
+      select: { id: true, title: true, location: true, type: true, latitude: true, longitude: true },
     })
     const map = new Map()
     for (const row of rows) {
@@ -199,6 +200,20 @@ opportunityRouter.get('/recommendations', requireAuth, async (req, res, next) =>
   }
 })
 
+opportunityRouter.get('/geocode', async (req, res, next) => {
+  try {
+    const query = String(req.query.q || '').trim()
+    if (query.length < 2 || query.length > 120) return fail(res, 400, 'VALIDATION', 'Enter the place name.')
+    const places = await searchPlaces(query)
+    return ok(res, { places })
+  } catch (error) {
+    if (error.name === 'TimeoutError' || error.name === 'AbortError' || error.message === 'Place search failed') {
+      return fail(res, 503, 'UNAVAILABLE', 'Place search is unavailable. Click the map to drop a pin.')
+    }
+    next(error)
+  }
+})
+
 opportunityRouter.get('/nearest', async (req, res, next) => {
   try {
     const lat = Number(req.query.lat)
@@ -206,8 +221,14 @@ opportunityRouter.get('/nearest', async (req, res, next) => {
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
       return fail(res, 400, 'VALIDATION', 'Choose a point on the map.')
     }
-    const city = nearestCity(lat, lng)
-    return ok(res, { name: city?.name || '' })
+    let name = ''
+    try {
+      name = (await reversePlace(lat, lng))?.name || ''
+    } catch {
+      name = ''
+    }
+    if (!name) name = nearestCity(lat, lng)?.name || ''
+    return ok(res, { name })
   } catch (error) {
     next(error)
   }

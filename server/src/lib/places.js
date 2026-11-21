@@ -56,7 +56,14 @@ export function locate(location) {
   return { name: hit[1], lat: hit[2], lng: hit[3] }
 }
 
-export function clusterHeld(rows, radiusKm = 15) {
+export const NEAR_KM = 3
+
+function pinName(locations) {
+  if (locations.length <= 2) return locations.join(' · ')
+  return `${locations[0]} · ${locations.length} places`
+}
+
+export function clusterHeld(rows, radiusKm = 0.15) {
   const clusters = []
   const unmapped = new Map()
   for (const row of rows) {
@@ -74,20 +81,25 @@ export function clusterHeld(rows, radiusKm = 15) {
     }
     let cluster = clusters.find((item) => haversine(item.lat, item.lng, lat, lng) <= radiusKm)
     if (!cluster) {
-      const city = nearestCity(lat, lng)
       cluster = {
-        name: city?.name || String(row.location || 'Selected place'),
+        name: '',
         lat,
         lng,
         internships: 0,
         events: 0,
         locations: [],
+        spots: [],
       }
       clusters.push(cluster)
     }
     if (row.type === 'EVENT') cluster.events += 1
     else cluster.internships += 1
-    if (row.location && !cluster.locations.includes(row.location)) cluster.locations.push(row.location)
+    const label = String(row.location || 'Selected place').trim() || 'Selected place'
+    if (!cluster.locations.includes(label)) cluster.locations.push(label)
+    cluster.name = pinName(cluster.locations)
+    if (row.id) {
+      cluster.spots.push({ id: row.id, title: row.title || label, location: label, type: row.type })
+    }
   }
   return {
     pins: clusters.sort((left, right) => left.name.localeCompare(right.name)),

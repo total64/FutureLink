@@ -16,6 +16,7 @@ export default function Dashboard() {
   const internships = items.filter((item) => item.type === 'INTERNSHIP').length
   const events = items.filter((item) => item.type !== 'INTERNSHIP' && item.type !== 'SCHOLARSHIP').length
   const savedCount = saved.data?.items?.length || 0
+  const reminders = (saved.data?.items || []).filter((item) => item.reminder)
 
   return (
     <Shell crumb="Overview">
@@ -27,8 +28,32 @@ export default function Dashboard() {
         <p className="text-xs font-semibold tracking-[0.14em] text-brand">MADE FOR YOUR NEXT MOVE</p>
         <h2 className="mt-2 max-w-lg font-display text-3xl font-semibold">Big ambitions. Right opportunities.</h2>
         <p className="mt-2 max-w-xl text-ink/70">Discover internships and tech events that grow with you. A match is interest, not confirmed eligibility.</p>
-        <Link to="/discover" className="mt-5 inline-flex rounded-full bg-brand px-5 py-2.5 font-medium text-white">See my matches</Link>
+        <div className="mt-5 flex flex-wrap gap-3">
+          <Link to="/profile" className="inline-flex rounded-full bg-brand px-5 py-2.5 font-medium text-white">Build my portfolio with AI</Link>
+          <Link to="/discover" className="inline-flex rounded-full bg-white px-5 py-2.5 font-medium text-ink">See my matches</Link>
+        </div>
       </section>
+
+      {reminders.length > 0 && (
+        <section className="mt-6 rounded-3xl border border-amber-200 bg-amber-50 p-5">
+          <h2 className="font-display text-2xl">Deadline reminders</h2>
+          <p className="mt-1 text-sm text-amber-950">Applications you already sent, and when each deadline arrives.</p>
+          <ul className="mt-4 space-y-2">
+            {reminders.map((item) => (
+              <li key={item.id}>
+                <Link to={`/opportunities/${item.opportunity.id}`} className="flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-white px-4 py-3">
+                  <span>
+                    <span className="block font-medium">{item.opportunity.title}</span>
+                    <span className="text-sm text-ink/60">{item.opportunity.organization?.name} · {formatDate(item.opportunity.closesAt)}</span>
+                  </span>
+                  <span className={`rounded-full px-3 py-1 text-sm ${item.reminder.level === 'upcoming' ? 'bg-paper text-ink/70' : 'bg-amber-100 text-amber-950'}`}>{item.reminder.label}</span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+          <Link to="/applications" className="mt-3 inline-block text-sm font-medium text-brand">See my applications</Link>
+        </section>
+      )}
 
       <div className="mt-5 grid gap-3 sm:grid-cols-3">
         {[
@@ -47,12 +72,15 @@ export default function Dashboard() {
       <div className="mt-8 flex items-end justify-between">
         <div>
           <h2 className="font-display text-2xl font-semibold">Recommended for you</h2>
-          <p className="text-sm text-ink/60">Matched to your skills, interests and career goals.</p>
+          <p className="text-sm text-ink/60">Only internships and events that fit your portfolio.</p>
         </div>
         <Link to="/discover" className="text-sm font-medium text-brand">View all</Link>
       </div>
       {recommendations.isLoading && <p className="mt-4 text-sm text-ink/60">Loading recommendations…</p>}
       {recommendations.error && <p className="mt-4 text-sm text-red-700">{recommendations.error.message}</p>}
+      {!recommendations.isLoading && !recommendations.error && items.length === 0 && (
+        <p className="mt-4 text-sm text-ink/60">No related opportunities yet. Add the skills, projects, and interests you have actually done, and only matching internships and events will show up here.</p>
+      )}
       <ul className="mt-4 space-y-3">
         {items.slice(0, 5).map((item) => (
           <li key={item.id}>

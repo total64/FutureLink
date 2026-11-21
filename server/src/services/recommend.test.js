@@ -35,10 +35,29 @@ test('a close listing scores higher than an unrelated one', () => {
     location: 'Nairobi',
     workMode: 'ONSITE',
   })
+  assert.equal(design.related, true)
+  assert.equal(network.related, false)
+  assert.equal(network.score, 0)
   assert.ok(design.score > network.score)
   assert.match(design.explanation, /Figma/)
   assert.equal(design.eligibility.overall, 'meets')
   assert.notEqual(network.eligibility.overall, 'meets')
+})
+
+test('location and education alone do not make a recommendation', () => {
+  const result = scoreOpportunity(profile, {
+    type: 'EVENT',
+    category: 'Events',
+    title: 'City Finance Forum',
+    description: 'A public talk about municipal budgeting.',
+    eligibility: 'Open to undergraduate students in Addis Ababa.',
+    audience: 'Undergraduate',
+    requiredSkills: ['Accounting'],
+    location: 'Addis Ababa',
+    workMode: 'HYBRID',
+  })
+  assert.equal(result.related, false)
+  assert.equal(result.score, 0)
 })
 
 test('eligibility stays unknown when the profile has no facts to compare', () => {

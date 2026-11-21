@@ -5,7 +5,11 @@ export default function OpportunityCard({ item }) {
   return (
     <Link to={`/opportunities/${item.id}`} className="block rounded-2xl border border-line bg-white p-4 shadow-card transition hover:-translate-y-0.5">
       <div className="flex items-start justify-between gap-3">
-        <span className="rounded-full bg-paper px-2.5 py-1 text-xs text-ink/70">{TYPE_BADGE[item.type] || item.type}</span>
+        <span className="flex gap-2">
+          <span className="rounded-full bg-paper px-2.5 py-1 text-xs text-ink/70">{TYPE_BADGE[item.type] || item.type}</span>
+          {item.featured && <span className="rounded-full bg-mint px-2.5 py-1 text-xs font-medium text-brand-dark">Featured</span>}
+          {item.promoted && <span className="rounded-full bg-mint px-2.5 py-1 text-xs font-medium text-brand-dark">Promoted</span>}
+        </span>
         {item.matchScore != null && (
           <span className="rounded-full bg-match px-2.5 py-1 text-xs font-medium text-ink">{item.matchScore}% match</span>
         )}

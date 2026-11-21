@@ -1,5 +1,5 @@
 const points = [
-  ['01', 'Discover your next move', 'Internships, scholarships, events and more.'],
+  ['01', 'Discover your next move', 'Internships and events, in one place.'],
   ['02', 'Turn experience into a story', 'Build a professional portfolio you confirm yourself.'],
   ['03', 'Connect on your terms', 'Verified organizations. Your permission.'],
 ]

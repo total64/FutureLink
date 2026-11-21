@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { prisma } from '../lib/prisma.js'
 import { fail, ok } from '../lib/http.js'
 import { publicOpportunity } from '../lib/catalog.js'
+import { deadlineReminder } from '../lib/deadline.js'
 import { requireAuth, requireRole } from '../middleware/auth.js'
 import { validate } from '../middleware/validate.js'
 
@@ -25,6 +26,9 @@ savedRouter.get('/', async (req, res, next) => {
         id: item.id,
         trackingStatus: item.trackingStatus,
         decision: decisionByOpportunity.get(item.opportunityId) || null,
+        reminder: decisionByOpportunity.get(item.opportunityId) === 'PENDING'
+          ? deadlineReminder(item.opportunity.closesAt)
+          : null,
         opportunity: publicOpportunity(item.opportunity),
       })),
     })

@@ -1,3 +1,8 @@
+export const ORGANIZER_TYPES = {
+  INTERNSHIP: 'Internship',
+  EVENT: 'Event',
+}
+
 export const TYPE_LABEL = {
   INTERNSHIP: 'Internships & Jobs',
   SCHOLARSHIP: 'Scholarships & Grants',

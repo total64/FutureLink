@@ -1,6 +1,8 @@
+import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import Shell from '../components/Shell'
+import PortfolioView from '../components/PortfolioView'
 import { api } from '../lib/api'
 import { decisionLabel, formatDate, statusLabel } from '../lib/format'
 
@@ -14,32 +16,58 @@ export function OrgOverview() {
   const data = query.data
   if (query.isLoading) return <Shell crumb="Overview"><p>Loading…</p></Shell>
   if (query.error) return <Shell crumb="Overview"><p className="text-red-700">{query.error.message}</p></Shell>
+  const org = data.organization
+  const sub = org.subscription
+  const internships = data.opportunities.filter((item) => item.type === 'INTERNSHIP')
+  const events = data.opportunities.filter((item) => item.type === 'EVENT')
   const stats = [
-    ['Active opportunities', data.stats.activeOpportunities],
-    ['Total applications', data.stats.totalApplications],
-    ['Opportunity views', data.stats.views],
-    ['Drafts', data.stats.drafts],
+    ['Live internships', internships.filter((item) => item.status === 'PUBLISHED').length],
+    ['Live events', events.filter((item) => item.status === 'PUBLISHED').length],
+    ['Applications', data.stats.totalApplications],
+    ['Views', data.stats.views],
   ]
   return (
     <Shell crumb="Overview">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="text-sm text-emerald-800">
-            {data.organization.verificationStatus === 'APPROVED' ? 'Verified organization' : `Verification: ${data.organization.verificationStatus.toLowerCase()}`}
+            {org.verificationStatus === 'APPROVED' ? 'Approved organization' : `Account ${org.verificationStatus.toLowerCase()}`}
+            {sub?.active ? ` · ${sub.plan} plan` : ''}
           </p>
-          <h1 className="mt-2 font-display text-4xl">Make room for your next great hire.</h1>
-          <p className="mt-2 text-ink/70">Here’s what’s happening across your opportunities at {data.organization.name}.</p>
+          <h1 className="mt-2 font-display text-4xl">{org.name}</h1>
+          <p className="mt-2 text-ink/70">Internships and events for this organization. Other categories will be added later.</p>
         </div>
         <Link to="/org/publish" className="rounded-xl bg-brand px-4 py-3 text-white">Create opportunity</Link>
       </div>
-      {data.organization.restrictedPosts > 0 && data.organization.owner?.status !== 'banned' && (
+      {!org.profileSubmitted && (
         <p className="mt-4 rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-950">
-          Community-restricted posts: {data.organization.restrictedPosts} of 3. Only tech-related listings can be published. A third restricted post bans the account.
+          Finish the organization profile and submit it. An admin approves the account before you can choose a plan. <Link to="/org/profile" className="font-medium">Open profile</Link>
         </p>
       )}
-      {data.organization.verificationStatus !== 'APPROVED' && (
+      {org.profileSubmitted && org.verificationStatus === 'PENDING' && (
+        <p className="mt-4 rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-950">Waiting for an admin to approve this organization.</p>
+      )}
+      {org.verificationStatus === 'REJECTED' && (
         <p className="mt-4 rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-950">
-          Public publishing stays locked until an admin verifies {data.organization.name}. You can still save drafts.
+          The account was rejected{org.reviewReason ? `: ${org.reviewReason}` : ''}. Update the profile and submit it again.
+        </p>
+      )}
+      {org.verificationStatus === 'APPROVED' && !sub?.active && (
+        <p className="mt-4 rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-950">
+          The account is approved. Choose Free, Basic, or Premium before publishing. <Link to="/org/plans" className="font-medium">View plans</Link>
+        </p>
+      )}
+      {sub?.renewSoon && (
+        <p className="mt-4 rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-950">
+          This plan ends {formatDate(sub.endsAt)}. <Link to="/org/plans" className="font-medium">Renew or upgrade</Link>
+        </p>
+      )}
+      {sub?.status === 'EXPIRED' && (
+        <p className="mt-4 rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-950">The subscription has expired. Renew it to publish again.</p>
+      )}
+      {org.restrictedPosts > 0 && (
+        <p className="mt-4 rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-950">
+          Community-restricted posts: {org.restrictedPosts} of 3. Only tech-related listings can be published.
         </p>
       )}
       <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -52,8 +80,8 @@ export function OrgOverview() {
       </div>
       <section className="mt-6 overflow-x-auto rounded-3xl border border-line bg-white">
         <div className="flex items-center justify-between px-4 py-3">
-          <h2 className="font-medium">Your opportunities</h2>
-          <Link to="/org/opportunities" className="text-sm">View all</Link>
+          <h2 className="font-medium">Internships and events</h2>
+          <Link to="/org/opportunities?type=INTERNSHIP" className="text-sm">View internships</Link>
         </div>
         <table className="w-full min-w-[640px] text-left text-sm">
           <thead className="text-ink/50">
@@ -69,7 +97,7 @@ export function OrgOverview() {
                 <td className="px-4 py-3">{item.viewCount}</td>
                 <td className="px-4 py-3">{statusLabel(item.listingStatus)}</td>
                 <td className="px-4 py-3">
-                  {data.organization.verificationStatus === 'APPROVED' && item.status === 'DRAFT' && (
+                  {org.verificationStatus === 'APPROVED' && sub?.active && item.status === 'DRAFT' && (
                     <button className="rounded-xl bg-brand px-3 py-1.5 text-white" disabled={publish.isPending} onClick={() => publish.mutate(item.id)}>Publish</button>
                   )}
                 </td>
@@ -83,28 +111,32 @@ export function OrgOverview() {
 }
 
 export function OrgOpportunities() {
+  const [params] = useSearchParams()
+  const type = params.get('type') === 'EVENT' ? 'EVENT' : 'INTERNSHIP'
   const client = useQueryClient()
   const query = useQuery({ queryKey: ['org-dashboard'], queryFn: () => api('/org/dashboard') })
   const publish = useMutation({
     mutationFn: (id) => api(`/org/opportunities/${id}/publish`, { method: 'POST' }),
     onSuccess: () => client.invalidateQueries({ queryKey: ['org-dashboard'] }),
   })
-  const verified = query.data?.organization?.verificationStatus === 'APPROVED'
+  const org = query.data?.organization
+  const canPublish = org?.verificationStatus === 'APPROVED' && org?.subscription?.active
+  const items = (query.data?.opportunities || []).filter((item) => item.type === type)
   return (
-    <Shell crumb="Opportunities">
-      <div className="flex items-center justify-between">
-        <h1 className="font-display text-4xl">Opportunities</h1>
-        <Link to="/org/publish" className="rounded-xl bg-brand px-4 py-2 text-white">Create opportunity</Link>
+    <Shell crumb={type === 'EVENT' ? 'Events' : 'Internships'}>
+      <div className="flex items-center justify-between gap-3">
+        <h1 className="font-display text-4xl">{type === 'EVENT' ? 'Events' : 'Internships'}</h1>
+        <Link to={`/org/publish?type=${type}`} className="rounded-xl bg-brand px-4 py-2 text-white">Create {type === 'EVENT' ? 'event' : 'internship'}</Link>
       </div>
       {publish.error && <p className="mt-4 text-sm text-red-700">{publish.error.message}</p>}
       <ul className="mt-6 space-y-3">
-        {(query.data?.opportunities || []).map((item) => (
+        {items.map((item) => (
           <li key={item.id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-line bg-white p-4">
             <div>
               <p className="font-medium">{item.title}</p>
               <p className="text-sm text-ink/60">{item.category} · {statusLabel(item.listingStatus)} · Closes {formatDate(item.closesAt)} · {item.viewCount} views</p>
             </div>
-            {verified && item.status === 'DRAFT' && (
+            {canPublish && item.status === 'DRAFT' && (
               <button
                 className="rounded-xl bg-brand px-4 py-2 text-sm text-white"
                 disabled={publish.isPending}
@@ -115,6 +147,7 @@ export function OrgOpportunities() {
             )}
           </li>
         ))}
+        {!query.isLoading && items.length === 0 && <li className="text-ink/60">No {type === 'EVENT' ? 'events' : 'internships'} yet.</li>}
       </ul>
     </Shell>
   )
@@ -122,36 +155,67 @@ export function OrgOpportunities() {
 
 export function OrgApplications() {
   const client = useQueryClient()
+  const [openId, setOpenId] = useState(null)
   const query = useQuery({ queryKey: ['org-applications'], queryFn: () => api('/org/applications') })
+  const portfolio = useQuery({
+    queryKey: ['org-application', openId],
+    queryFn: () => api(`/org/applications/${openId}`),
+    enabled: Boolean(openId),
+  })
   const review = useMutation({
     mutationFn: ({ id, status }) => api(`/org/applications/${id}`, { method: 'PATCH', body: { status } }),
-    onSuccess: () => client.invalidateQueries({ queryKey: ['org-applications'] }),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: ['org-applications'] })
+      client.invalidateQueries({ queryKey: ['org-application', openId] })
+    },
   })
   return (
     <Shell crumb="Applications">
       <h1 className="font-display text-4xl">Applications</h1>
-      <p className="mt-2 text-ink/70">Accept or reject each applicant. They see that decision on their applications page.</p>
+      <p className="mt-2 text-ink/70">Open the applicant’s portfolio, then accept them if it fits or reject them if it does not.</p>
       {review.error && <p className="mt-4 text-sm text-red-700">{review.error.message}</p>}
       <ul className="mt-6 space-y-3">
         {(query.data?.items || []).map((item) => (
-          <li key={item.id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-line bg-white p-4">
-            <div>
-              <p className="font-medium">{item.applicant.firstName} {item.applicant.lastName}</p>
-              <p className="text-sm text-ink/60">{item.applicant.email}</p>
-              <p className="text-sm text-ink/60">{item.opportunity.title} · Applied {formatDate(item.createdAt)}</p>
-              <ul className="mt-2 space-y-1 text-sm">
-                {(item.form || []).map((field) => (
-                  <li key={field.id}><span className="text-ink/50">{field.label}: </span>{item.answers?.[field.id] || '—'}</li>
-                ))}
-              </ul>
-            </div>
-            {item.status === 'PENDING' ? (
-              <div className="flex gap-2">
-                <button className="rounded-xl bg-brand px-4 py-2 text-sm text-white" disabled={review.isPending} onClick={() => review.mutate({ id: item.id, status: 'ACCEPTED' })}>Accept</button>
-                <button className="rounded-xl border border-line px-4 py-2 text-sm" disabled={review.isPending} onClick={() => review.mutate({ id: item.id, status: 'REJECTED' })}>Reject</button>
+          <li key={item.id} className="rounded-2xl border border-line bg-white p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="font-medium">{item.applicant.firstName} {item.applicant.lastName}</p>
+                <p className="text-sm text-ink/60">{item.applicant.email}</p>
+                <p className="text-sm text-ink/60">{item.opportunity.title} · Applied {formatDate(item.createdAt)}</p>
+                {item.gaps?.length > 0 && <p className="mt-1 text-sm text-ink/60">Portfolio does not yet show: {item.gaps.join(', ')}.</p>}
               </div>
-            ) : (
-              <p className={`text-sm font-medium ${item.status === 'ACCEPTED' ? 'text-brand-dark' : 'text-ink/60'}`}>{decisionLabel(item.status)}</p>
+              <div className="flex flex-wrap gap-2">
+                <button className="rounded-xl border border-line px-4 py-2 text-sm" onClick={() => setOpenId(openId === item.id ? null : item.id)}>
+                  {openId === item.id ? 'Hide portfolio' : 'View portfolio'}
+                </button>
+                {item.status === 'PENDING' ? (
+                  <>
+                    <button className="rounded-xl bg-brand px-4 py-2 text-sm text-white" disabled={review.isPending} onClick={() => review.mutate({ id: item.id, status: 'ACCEPTED' })}>Accept</button>
+                    <button className="rounded-xl border border-line px-4 py-2 text-sm" disabled={review.isPending} onClick={() => review.mutate({ id: item.id, status: 'REJECTED' })}>Reject</button>
+                  </>
+                ) : (
+                  <p className={`self-center text-sm font-medium ${item.status === 'ACCEPTED' ? 'text-brand-dark' : 'text-ink/60'}`}>{decisionLabel(item.status)}</p>
+                )}
+              </div>
+            </div>
+            <ul className="mt-3 space-y-1 text-sm">
+              {(item.form || []).map((field) => (
+                <li key={field.id}><span className="text-ink/50">{field.label}: </span>{item.answers?.[field.id] || '—'}</li>
+              ))}
+            </ul>
+            {openId === item.id && (
+              <div className="mt-4">
+                {portfolio.isLoading && <p className="text-sm">Loading portfolio…</p>}
+                {portfolio.error && <p className="text-sm text-red-700">{portfolio.error.message}</p>}
+                {portfolio.data && !portfolio.data.portfolio && <p className="text-sm text-ink/60">This applicant has not built a portfolio yet.</p>}
+                {portfolio.data?.portfolio && (
+                  <PortfolioView
+                    profile={portfolio.data.portfolio}
+                    name={`${portfolio.data.applicant.firstName} ${portfolio.data.applicant.lastName}`}
+                    email={portfolio.data.applicant.email}
+                  />
+                )}
+              </div>
             )}
           </li>
         ))}

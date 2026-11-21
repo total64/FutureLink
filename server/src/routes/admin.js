@@ -5,13 +5,14 @@ import { fail, ok } from '../lib/http.js'
 import { requireAuth, requireRole } from '../middleware/auth.js'
 import { validate } from '../middleware/validate.js'
 import { classifyContent } from '../services/contentPolicy.js'
+import { periodDays } from '../services/plans.js'
 
 export const adminRouter = Router()
 adminRouter.use(requireAuth, requireRole('ADMIN'))
 
 adminRouter.get('/dashboard', async (_req, res, next) => {
   try {
-    const [seekers, providers, admins, organizations, pending, listings, applications, restricted, banned] = await Promise.all([
+    const [seekers, providers, admins, organizations, pending, listings, applications, restricted, banned, pendingPayments] = await Promise.all([
       prisma.user.count({ where: { role: 'SEEKER' } }),
       prisma.user.count({ where: { role: 'PROVIDER' } }),
       prisma.user.count({ where: { role: 'ADMIN' } }),
@@ -21,8 +22,9 @@ adminRouter.get('/dashboard', async (_req, res, next) => {
       prisma.application.count(),
       prisma.opportunity.count({ where: { contentClass: 'RESTRICTED', status: { not: 'REMOVED' } } }),
       prisma.user.count({ where: { status: 'banned' } }),
+      prisma.payment.count({ where: { status: 'PENDING' } }),
     ])
-    return ok(res, { seekers, providers, admins, organizations, pending, listings, applications, restricted, banned })
+    return ok(res, { seekers, providers, admins, organizations, pending, listings, applications, restricted, banned, pendingPayments })
   } catch (error) {
     next(error)
   }
@@ -64,6 +66,9 @@ adminRouter.patch('/organizations/:id', validate(reviewSchema), async (req, res,
         portfolioStatus: req.valid.body.status === 'APPROVED'
           ? (profileText === 'RESTRICTED' ? 'PENDING' : 'APPROVED')
           : existing.portfolioStatus,
+        ...(req.valid.body.status === 'APPROVED' && existing.plan !== 'BASIC' && existing.plan !== 'PREMIUM'
+          ? { plan: 'FREE', billingPeriod: 'NONE', subscriptionStatus: 'ACTIVE', subscriptionEndsAt: null }
+          : {}),
       },
     })
     return ok(res, organization)
@@ -182,6 +187,70 @@ adminRouter.post('/opportunities/:id/ban', async (req, res, next) => {
       data: { status: 'REMOVED', contentClass: 'RESTRICTED', banReason: 'Banned by admin as community-restricted content.' },
     })
     return ok(res, { id: item.id, status: item.status })
+  } catch (error) {
+    next(error)
+  }
+})
+
+adminRouter.get('/payments', async (_req, res, next) => {
+  try {
+    const items = await prisma.payment.findMany({
+      include: { org: { select: { id: true, name: true, plan: true, subscriptionStatus: true } } },
+      orderBy: { createdAt: 'desc' },
+    })
+    return ok(res, { items })
+  } catch (error) {
+    next(error)
+  }
+})
+
+const paymentSchema = z.object({
+  params: z.object({ id: z.string().uuid() }),
+  body: z.object({
+    status: z.enum(['VERIFIED', 'REJECTED']),
+    note: z.string().trim().max(400).optional(),
+  }),
+})
+
+adminRouter.post('/payments/:id/review', validate(paymentSchema), async (req, res, next) => {
+  try {
+    const payment = await prisma.payment.findUnique({ where: { id: req.valid.params.id } })
+    if (!payment) return fail(res, 404, 'NOT_FOUND', 'Payment not found.')
+    if (payment.status !== 'PENDING') return fail(res, 409, 'DECIDED', 'This payment was already reviewed.')
+    if (req.valid.body.status === 'REJECTED') {
+      const updated = await prisma.payment.update({
+        where: { id: payment.id },
+        data: { status: 'REJECTED', reviewNote: req.valid.body.note || '', reviewedAt: new Date() },
+      })
+      const org = await prisma.organization.findUnique({ where: { id: payment.orgId } })
+      if (org?.subscriptionStatus === 'PENDING_PAYMENT') {
+        await prisma.organization.update({ where: { id: org.id }, data: { subscriptionStatus: 'NONE' } })
+      }
+      return ok(res, updated)
+    }
+    const days = periodDays(payment.billingPeriod)
+    if (!days) return fail(res, 400, 'VALIDATION', 'This payment has no billing period.')
+    const org = await prisma.organization.findUnique({ where: { id: payment.orgId } })
+    const now = new Date()
+    const extend = org.subscriptionStatus === 'ACTIVE' && org.plan === payment.plan && org.subscriptionEndsAt && org.subscriptionEndsAt > now
+    const start = extend ? org.subscriptionEndsAt : now
+    const endsAt = new Date(start.getTime() + days * 24 * 60 * 60 * 1000)
+    const [updated] = await prisma.$transaction([
+      prisma.payment.update({
+        where: { id: payment.id },
+        data: { status: 'VERIFIED', reviewNote: req.valid.body.note || '', reviewedAt: now },
+      }),
+      prisma.organization.update({
+        where: { id: payment.orgId },
+        data: {
+          plan: payment.plan,
+          billingPeriod: payment.billingPeriod,
+          subscriptionStatus: 'ACTIVE',
+          subscriptionEndsAt: endsAt,
+        },
+      }),
+    ])
+    return ok(res, updated)
   } catch (error) {
     next(error)
   }

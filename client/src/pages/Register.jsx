@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom'
 import BrandPanel from '../components/BrandPanel'
+import PasswordField from '../components/PasswordField'
 import { useAuth } from '../auth'
 import { homeFor } from '../lib/roles'
 
@@ -31,7 +32,7 @@ export default function Register() {
     setPending(true)
     try {
       const user = await register({ ...form, accountType })
-      navigate(homeFor(user.role))
+      navigate(homeFor(user))
     } catch (err) {
       setError(err.message)
     } finally {
@@ -39,7 +40,7 @@ export default function Register() {
     }
   }
 
-  if (ready && user) return <Navigate to={homeFor(user.role)} replace />
+  if (ready && user) return <Navigate to={homeFor(user)} replace />
 
   return (
     <div className="min-h-screen bg-paper lg:flex">
@@ -57,7 +58,7 @@ export default function Register() {
           <p className="mb-2 mt-8 text-sm">Sign up as</p>
           <div className="grid gap-3 sm:grid-cols-2">
             {[
-              ['seeker', 'Student', 'Looking for internships, events and scholarships'],
+              ['seeker', 'Opportunity seeker', 'Looking for internships and events'],
               ['provider', 'Organization', 'Publishing opportunities for students'],
             ].map(([id, title, copy]) => (
               <button
@@ -80,11 +81,10 @@ export default function Register() {
             <label className="mt-4 block"><span className="label">Organization name</span><input className="field" name="organizationName" value={form.organizationName} onChange={update} required /></label>
           )}
           <label className="mt-4 block"><span className="label">Email address</span><input className="field" type="email" name="email" value={form.email} onChange={update} required /></label>
-          <label className="mt-4 block">
-            <span className="label">Password</span>
-            <input className="field" type="password" name="password" value={form.password} onChange={update} required />
-            <span className="mt-1 block text-xs text-ink/50">Use 8 or more characters, including letters and numbers.</span>
-          </label>
+          <div className="mt-4">
+            <PasswordField label="Password" name="password" value={form.password} onChange={update} autoComplete="new-password" hint="Use 8 or more characters, including letters and numbers." />
+          </div>
+          <p className="mt-3 text-sm"><Link to="/forgot-password" className="font-medium text-brand">Forgot password?</Link></p>
           <label className="mt-4 flex items-start gap-2 text-sm">
             <input type="checkbox" name="acceptedTerms" checked={form.acceptedTerms} onChange={update} className="mt-1" />
             <span>I agree to the Terms of Service and Privacy Policy.</span>

@@ -21,9 +21,23 @@ export function parseDeadline(value) {
   return date
 }
 
+export function deadlineReminder(closesAt, now = new Date()) {
+  if (!closesAt) return null
+  const end = new Date(closesAt)
+  if (Number.isNaN(end.getTime())) return null
+  const hours = (end.getTime() - now.getTime()) / 36e5
+  if (hours < 0) return { level: 'passed', label: 'Deadline passed' }
+  if (hours < 24) return { level: 'today', label: 'Deadline is today' }
+  if (hours < 48) return { level: 'soon', label: 'Deadline is tomorrow' }
+  const days = Math.ceil(hours / 24)
+  if (days <= 7) return { level: 'soon', label: `Deadline in ${days} days` }
+  return { level: 'upcoming', label: `Deadline in ${days} days` }
+}
+
 export function openWhere(now = new Date()) {
   return {
     status: 'PUBLISHED',
+    type: { in: ['INTERNSHIP', 'EVENT'] },
     org: { verificationStatus: 'APPROVED' },
     OR: [{ closesAt: null }, { closesAt: { gte: now } }],
   }

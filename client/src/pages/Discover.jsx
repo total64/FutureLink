@@ -3,11 +3,12 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import Shell from '../components/Shell'
 import OpportunityCard from '../components/OpportunityCard'
+import PlaceMap from '../components/PlaceMap'
 import { useAuth } from '../auth'
 import { api } from '../lib/api'
-import { TYPE_LABEL } from '../lib/format'
+import { ORGANIZER_TYPES } from '../lib/format'
 
-const tabs = [{ id: '', label: 'All opportunities' }, ...Object.entries(TYPE_LABEL).map(([id, label]) => ({ id, label }))]
+const tabs = [{ id: '', label: 'All' }, ...Object.entries(ORGANIZER_TYPES).map(([id, label]) => ({ id, label: `${label}s` }))]
 
 export default function Discover() {
   const { user } = useAuth()
@@ -15,19 +16,26 @@ export default function Discover() {
   const [type, setType] = useState(searchParams.get('type') || (user ? 'FOR_YOU' : ''))
   const [q, setQ] = useState('')
   const [draft, setDraft] = useState('')
-  const [location, setLocation] = useState('')
+  const [location, setLocation] = useState(searchParams.get('location') || '')
+  const [held, setHeld] = useState(searchParams.get('held') || '')
+  const [near, setNear] = useState(searchParams.get('near') || '')
+  const [nearLabel, setNearLabel] = useState('')
   const [workMode, setWorkMode] = useState('')
   const [deadline, setDeadline] = useState('any')
   const [audience, setAudience] = useState('')
   const [sort, setSort] = useState('newest')
 
   useEffect(() => {
+    const place = searchParams.get('location')
+    if (place != null) setLocation(place)
+    const heldPlace = searchParams.get('held')
+    if (heldPlace != null) setHeld(heldPlace)
     const fromUrl = searchParams.get('type')
     if (fromUrl) {
       setType(fromUrl)
       return
     }
-    if (user) {
+    if (user && !searchParams.get('location')) {
       setType('FOR_YOU')
       setSort('match')
     }
@@ -37,23 +45,38 @@ export default function Discover() {
     const search = new URLSearchParams()
     if (q) search.set('q', q)
     if (type && type !== 'FOR_YOU') search.set('type', type)
-    if (location) search.set('location', location)
+    if (near) search.set('near', near)
+    else if (held) search.set('held', held)
+    else if (location) search.set('location', location)
     if (workMode) search.set('workMode', workMode)
     if (deadline !== 'any') search.set('deadline', deadline)
     if (audience) search.set('audience', audience)
     search.set('sort', sort)
     search.set('limit', '24')
     return search.toString()
-  }, [q, type, location, workMode, deadline, audience, sort])
+  }, [q, type, location, held, near, workMode, deadline, audience, sort])
 
   const list = useQuery({
     queryKey: ['opportunities', params],
     queryFn: () => api(`/opportunities?${params}`),
     enabled: type !== 'FOR_YOU',
   })
+  const places = useQuery({
+    queryKey: ['places'],
+    queryFn: () => api('/opportunities/places'),
+  })
   const recommended = useQuery({
-    queryKey: ['recommendations'],
-    queryFn: () => api('/opportunities/recommendations'),
+    queryKey: ['recommendations', location, held, near],
+    queryFn: () => {
+      const place = near
+        ? `near=${encodeURIComponent(near)}`
+        : held
+          ? `held=${encodeURIComponent(held)}`
+          : location
+            ? `location=${encodeURIComponent(location)}`
+            : ''
+      return api(`/opportunities/recommendations${place ? `?${place}` : ''}`)
+    },
     enabled: type === 'FOR_YOU' && Boolean(user),
   })
 
@@ -99,6 +122,62 @@ export default function Discover() {
         ))}
       </div>
 
+      <section className="mt-6 overflow-hidden rounded-3xl border border-line bg-white">
+        <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
+          <div>
+            <p className="font-medium">Where they are held</p>
+            <p className="text-sm text-ink/60">Choose a place on the map to show internships and events held there.</p>
+          </div>
+          {(near || held) && (
+            <button className="rounded-full bg-mint px-3 py-1.5 text-sm" onClick={() => { setNear(''); setNearLabel(''); setHeld('') }}>
+              {nearLabel || held} · clear
+            </button>
+          )}
+        </div>
+        {(places.data?.pins || []).length > 0 ? (
+          <>
+            <PlaceMap
+              pins={places.data.pins}
+              selected={nearLabel}
+              onSelect={(name) => {
+                const pin = places.data.pins.find((item) => item.name === name)
+                if (!pin) return
+                setNear(`${pin.lat},${pin.lng}`)
+                setNearLabel(pin.name)
+                setHeld('')
+                setLocation('')
+              }}
+            />
+            <div className="flex flex-wrap gap-2 px-4 py-3">
+              {places.data.pins.map((pin) => (
+                <button
+                  key={`${pin.lat},${pin.lng}`}
+                  className={`rounded-full px-3 py-1.5 text-sm ${nearLabel === pin.name ? 'bg-brand text-white' : 'bg-paper'}`}
+                  onClick={() => { setNear(`${pin.lat},${pin.lng}`); setNearLabel(pin.name); setHeld(''); setLocation('') }}
+                >
+                  {pin.name} · {pin.internships + pin.events}
+                </button>
+              ))}
+            </div>
+          </>
+        ) : (
+          <p className="px-4 pb-4 text-sm text-ink/60">{places.isLoading ? 'Loading places…' : 'No mapped places yet.'}</p>
+        )}
+        {(places.data?.unmapped || []).length > 0 && (
+          <div className="flex flex-wrap gap-2 px-4 py-3">
+            {places.data.unmapped.map((place) => (
+              <button
+                key={place.location}
+                className={`rounded-full px-3 py-1.5 text-sm ${location === place.location ? 'bg-brand text-white' : 'bg-paper'}`}
+                onClick={() => { setLocation(place.location); setHeld('') }}
+              >
+                {place.location}
+              </button>
+            ))}
+          </div>
+        )}
+      </section>
+
       <form
         className="mt-4 flex gap-2"
         onSubmit={(event) => {
@@ -115,10 +194,20 @@ export default function Discover() {
         <aside className="h-fit rounded-2xl border border-line bg-white p-4">
           <div className="mb-3 flex items-center justify-between">
             <p className="font-medium">Filters</p>
-            <button className="text-sm text-ink/60" onClick={() => { setLocation(''); setWorkMode(''); setDeadline('any'); setAudience('') }}>Reset</button>
+            <button className="text-sm text-ink/60" onClick={() => { setLocation(''); setHeld(''); setNear(''); setNearLabel(''); setWorkMode(''); setDeadline('any'); setAudience('') }}>Reset</button>
           </div>
-          <label className="label">Location</label>
-          <input className="field" value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Ethiopia" />
+          <label className="label">Held in</label>
+          <select className="field" value={location} onChange={(e) => { setLocation(e.target.value); setHeld('') }}>
+            <option value="">Any place</option>
+            {(places.data?.places || []).map((place) => {
+              const counts = [
+                place.internships ? `${place.internships} internship${place.internships === 1 ? '' : 's'}` : '',
+                place.events ? `${place.events} event${place.events === 1 ? '' : 's'}` : '',
+              ].filter(Boolean).join(', ')
+              return <option key={place.location} value={place.location}>{place.location}{counts ? ` · ${counts}` : ''}</option>
+            })}
+          </select>
+          <p className="mt-1 text-xs text-ink/50">The place written on the internship or event.</p>
           <p className="label mt-4">Work arrangement</p>
           {['', 'REMOTE', 'ONSITE', 'HYBRID'].map((mode) => (
             <label key={mode || 'any'} className="mt-1 flex items-center gap-2 text-sm">
@@ -153,7 +242,9 @@ export default function Discover() {
           {error && <p className="text-sm text-red-700">{error.message}</p>}
           {!loading && items.length === 0 && (
             <div className="rounded-2xl border border-dashed border-line bg-white p-8 text-ink/70">
-              Nothing matches these filters. Widen the search, or build your profile so recommendations have more to work with.
+              {type === 'FOR_YOU'
+                ? 'No related opportunities match your portfolio. Browse all listings, or add skills and projects you have actually done.'
+                : `Nothing is held${nearLabel || held || location ? ` in ${nearLabel || held || location}` : ''} for these filters. Choose another place or show every open listing.`}
             </div>
           )}
           <div className="grid gap-4 md:grid-cols-2">

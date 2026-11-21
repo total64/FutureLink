@@ -7,17 +7,25 @@ import { env } from './config.js'
 import { fail } from './lib/http.js'
 import { authRouter } from './routes/auth.js'
 import { opportunityRouter } from './routes/opportunities.js'
-import { profileRouter } from './routes/profile.js'
+import { profileRouter, publicPortfolioRouter } from './routes/profile.js'
 import { savedRouter } from './routes/saved.js'
 import { orgRouter } from './routes/org.js'
 import { adminRouter } from './routes/admin.js'
+import { assistantRouter } from './routes/assistant.js'
 import { OPPORTUNITY_TYPES } from './lib/catalog.js'
 
 export function createApp() {
   const app = express()
-  app.use(helmet())
+  app.use(helmet({
+    contentSecurityPolicy: {
+      directives: {
+        ...helmet.contentSecurityPolicy.getDefaultDirectives(),
+        'img-src': ["'self'", 'data:', 'https:'],
+      },
+    },
+  }))
   app.use(cors({ origin: env.clientOrigins, credentials: true }))
-  app.use(express.json({ limit: '1mb' }))
+  app.use(express.json({ limit: '8mb' }))
   app.use(cookieParser())
 
   const authLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 30, standardHeaders: true, legacyHeaders: false })
@@ -31,7 +39,9 @@ export function createApp() {
 
   app.use('/api/v1/auth', authLimit, authRouter)
   app.use('/api/v1/opportunities', opportunityRouter)
+  app.use('/api/v1/assistant', assistantRouter)
   app.use('/api/v1/profile', profileRouter)
+  app.use('/api/v1/portfolios', publicPortfolioRouter)
   app.use('/api/v1/saved', savedRouter)
   app.use('/api/v1/org', orgRouter)
   app.use('/api/v1/admin', adminRouter)

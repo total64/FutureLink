@@ -23,3 +23,18 @@ button, input, select, textarea {
 .label {
   @apply mb-1.5 block text-sm text-ink/80;
 }
+
+.place-map {
+  position: relative;
+  z-index: 0;
+  border-radius: 1rem;
+}
+
+.place-map .leaflet-pane {
+  z-index: 1 !important;
+}
+
+.place-map .leaflet-top,
+.place-map .leaflet-bottom {
+  z-index: 2 !important;
+}

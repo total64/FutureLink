@@ -11,12 +11,16 @@ const INTERESTS = [
 
 const LEVELS = ['Undergraduate', 'Graduate', 'Diploma', 'High school']
 
+function mentions(source, phrase) {
+  const pattern = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return new RegExp(`(?:^|[^a-z0-9])${pattern}(?![a-z0-9])`, 'i').test(source)
+}
+
 export function structureText(text) {
   const source = String(text || '')
-  const lower = source.toLowerCase()
-  const skills = SKILLS.filter((skill) => lower.includes(skill.toLowerCase()))
-  const interests = INTERESTS.filter((interest) => lower.includes(interest.toLowerCase()))
-  const educationLevel = LEVELS.find((level) => lower.includes(level.toLowerCase())) || ''
+  const skills = SKILLS.filter((skill) => mentions(source, skill))
+  const interests = INTERESTS.filter((interest) => mentions(source, interest))
+  const educationLevel = LEVELS.find((level) => mentions(source, level)) || ''
   const universityMatch = source.match(/([A-Z][\w&.'’-]*(?:\s+[A-Z][\w&.'’-]*)*\s+University)/ )
   return {
     skills,

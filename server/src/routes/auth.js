@@ -150,6 +150,61 @@ authRouter.post('/logout', async (req, res, next) => {
   }
 })
 
+const forgotSchema = z.object({
+  body: z.object({
+    email: z.string().trim().email('Enter a valid email address.'),
+  }),
+})
+
+const resetSchema = z.object({
+  body: z.object({
+    token: z.string().trim().min(20, 'This reset link is not valid.'),
+    password,
+  }),
+})
+
+authRouter.post('/forgot', validate(forgotSchema), async (req, res, next) => {
+  try {
+    const email = req.valid.body.email.toLowerCase()
+    const user = await prisma.user.findUnique({ where: { email } })
+    if (!user || user.status === 'banned') return ok(res, { resetToken: null })
+    await prisma.passwordReset.updateMany({
+      where: { userId: user.id, usedAt: null },
+      data: { usedAt: new Date() },
+    })
+    const reset = newRefreshToken()
+    reset.expiresAt = new Date(Date.now() + 30 * 60 * 1000)
+    await prisma.passwordReset.create({
+      data: { userId: user.id, tokenHash: reset.tokenHash, expiresAt: reset.expiresAt },
+    })
+    return ok(res, { resetToken: reset.raw })
+  } catch (error) {
+    next(error)
+  }
+})
+
+authRouter.post('/reset', validate(resetSchema), async (req, res, next) => {
+  try {
+    const tokenHash = hashRefreshToken(req.valid.body.token)
+    const stored = await prisma.passwordReset.findUnique({ where: { tokenHash } })
+    if (!stored || stored.usedAt || stored.expiresAt < new Date()) {
+      return fail(res, 400, 'VALIDATION', 'This reset link has expired. Request a new one.')
+    }
+    await prisma.user.update({
+      where: { id: stored.userId },
+      data: { passwordHash: await hashPassword(req.valid.body.password) },
+    })
+    await prisma.passwordReset.update({ where: { id: stored.id }, data: { usedAt: new Date() } })
+    await prisma.refreshToken.updateMany({
+      where: { userId: stored.userId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    })
+    return ok(res, { reset: true })
+  } catch (error) {
+    next(error)
+  }
+})
+
 authRouter.get('/me', requireAuth, async (req, res, next) => {
   try {
     const user = await prisma.user.findUnique({

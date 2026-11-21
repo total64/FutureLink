@@ -60,6 +60,8 @@ export function publicOpportunity(opportunity, extra = {}) {
     listingStatus: listingStatus(opportunity),
     viewCount: opportunity.viewCount,
     applyClicks: opportunity.applyClicks,
+    featured: Boolean(opportunity.featured),
+    promoted: Boolean(opportunity.promoted),
     organization: opportunity.org
       ? {
           id: opportunity.org.id,
@@ -116,6 +118,7 @@ export function publicUser(user) {
           id: user.organization.id,
           name: user.organization.name,
           verificationStatus: user.organization.verificationStatus,
+          profileSubmitted: user.organization.profileSubmitted,
           location: user.organization.location,
         }
       : null,

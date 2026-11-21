@@ -117,8 +117,21 @@ model User {
   profile       Profile?
   organization  Organization?
   refreshTokens RefreshToken[]
+  passwordResets PasswordReset[]
   savedItems    SavedItem[]
   applications  Application[]
+}
+
+model PasswordReset {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
 }
 
 model RefreshToken {
@@ -146,6 +159,15 @@ model Profile {
   projects       Json     @default("[]")
   bio            String   @default("")
   careerGoals    String   @default("")
+  portfolioUrl   String   @default("")
+  photoUrl       String   @default("")
+  phone          String   @default("")
+  experiences    Json     @default("[]")
+  certifications Json     @default("[]")
+  template       String   @default("modern")
+  slug           String?  @unique
+  published      Boolean  @default(false)
+  sourceNotes    Json     @default("{}")
   locations      String[]
   workModes      String[]
   aiSummary      String   @default("")
@@ -198,6 +220,8 @@ model Opportunity {
   audience         String            @default("")
   requiredSkills   String[]
   location         String            @default("")
+  latitude         Float?
+  longitude        Float?
   workMode         WorkMode          @default(UNSPECIFIED)
   compensation     Compensation      @default(UNSPECIFIED)
   duration         String            @default("")

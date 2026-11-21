@@ -15,6 +15,11 @@ export default function OpportunityDetail() {
     queryKey: ['opportunity', id],
     queryFn: () => api(`/opportunities/${id}`),
   })
+  const profile = useQuery({
+    queryKey: ['profile'],
+    queryFn: () => api('/profile'),
+    enabled: user?.role === 'SEEKER',
+  })
 
   const [answers, setAnswers] = useState({})
   const [confirming, setConfirming] = useState(false)
@@ -37,9 +42,15 @@ export default function OpportunityDetail() {
   if (query.error) return <Shell crumb="Opportunity details"><p className="text-red-700">{query.error.message}</p></Shell>
 
   const lines = (value) => String(value || '').split('\n').filter(Boolean)
+  const event = item.type === 'EVENT'
+  const portfolioSkills = profile.data?.skills || []
+  const gaps = !event && portfolioSkills.length
+    ? (item.requiredSkills || []).filter((skill) => !portfolioSkills.some((known) => known.toLowerCase() === skill.toLowerCase()))
+    : []
+  const attendance = { ONSITE: 'In person', REMOTE: 'Online', HYBRID: 'In person and online' }
 
   return (
-    <Shell crumb="Opportunity details">
+    <Shell crumb={event ? 'Event' : 'Internship'}>
       <Link to="/discover" className="text-sm text-ink/60">← Back to discover</Link>
       <div className="mt-4 grid gap-6 lg:grid-cols-[1fr_320px]">
         <article className="rounded-3xl border border-line bg-white p-6">
@@ -51,8 +62,9 @@ export default function OpportunityDetail() {
                 {item.organization?.name} {item.organization?.verified && <span className="text-emerald-800">· Verified organization</span>}
               </p>
               <p className="mt-2 text-sm text-ink/60">
-                {item.location} · {WORK_LABEL[item.workMode]} {item.duration ? `· ${item.duration}` : ''} · {PAY_LABEL[item.compensation]}
+                {item.location} · {event ? attendance[item.workMode] : WORK_LABEL[item.workMode]} {item.duration ? `· ${item.duration}` : ''} · {event ? (item.compensation === 'PAID' ? 'Paid ticket' : 'Free entry') : PAY_LABEL[item.compensation]}
               </p>
+              {event && item.startsAt && <p className="mt-2 text-sm">Starts {formatDate(item.startsAt)}</p>}
             </div>
             <button
               className="rounded-xl border border-line px-3 py-2 text-sm"
@@ -64,17 +76,17 @@ export default function OpportunityDetail() {
               {item.saved ? 'Saved' : 'Save'}
             </button>
           </div>
-          <h2 className="mt-8 font-display text-2xl">The work</h2>
+          <h2 className="mt-8 font-display text-2xl">{event ? 'About this event' : 'The role'}</h2>
           <p className="mt-3 leading-7 text-ink/80">{item.description}</p>
           {lines(item.responsibilities).length > 0 && (
             <>
-              <h3 className="mt-6 font-medium">What you’ll work on</h3>
+              <h3 className="mt-6 font-medium">{event ? 'What to expect' : 'What you’ll work on'}</h3>
               <ul className="mt-2 list-disc space-y-1 pl-5 text-ink/80">
                 {lines(item.responsibilities).map((line) => <li key={line}>{line}</li>)}
               </ul>
             </>
           )}
-          <h3 className="mt-6 font-medium">Who can apply</h3>
+          <h3 className="mt-6 font-medium">{event ? 'Who should attend' : 'Who can apply'}</h3>
           <ul className="mt-2 list-disc space-y-1 pl-5 text-ink/80">
             {lines(item.eligibility).map((line) => <li key={line}>{line}</li>)}
           </ul>
@@ -94,10 +106,13 @@ export default function OpportunityDetail() {
 
         <aside className="space-y-4">
           <section className="rounded-3xl bg-mint p-5">
-            <p className="text-sm text-ink/70">A strong interest match</p>
-            <p className="font-display text-5xl">{item.matchScore ?? '—'}</p>
-            <p className="text-sm">{item.matchScore != null ? 'Recommended for you' : 'Sign in and build a profile to see your match.'}</p>
+            <p className="text-sm text-ink/70">{item.related ? 'A portfolio match' : 'Portfolio match'}</p>
+            <p className="font-display text-5xl">{item.related ? item.matchScore : '—'}</p>
+            <p className="text-sm">{item.related ? 'Recommended for you' : item.related === false ? 'Not related to your portfolio' : 'Sign in and build a portfolio to see your match.'}</p>
             {item.explanation && <p className="mt-3 text-sm text-ink/80">{item.explanation}</p>}
+            {gaps.length > 0 && (
+              <p className="mt-3 text-sm text-ink/80">Your portfolio does not yet show {gaps.join(', ')}. Add a project only if you have done that work.</p>
+            )}
             {item.eligibilityChecks?.length > 0 && (
               <div className="mt-4">
                 <p className="text-sm font-medium">Eligibility is a separate check</p>
@@ -113,10 +128,10 @@ export default function OpportunityDetail() {
             )}
           </section>
           <section className="rounded-3xl border border-line bg-white p-5">
-            <p className="text-sm text-ink/60">Applications close</p>
+            <p className="text-sm text-ink/60">{event ? 'Registration closes' : 'Applications close'}</p>
             <p className="mt-1 font-display text-2xl">{formatDate(item.closesAt)}</p>
             <p className="text-xs text-ink/50">Addis Ababa time</p>
-            <p className="mt-3 text-sm text-ink/70">Apply on this page. The form is not sent to another website.</p>
+            <p className="mt-3 text-sm text-ink/70">{event ? 'Register on this page. The form is not sent to another website.' : 'Apply on this page. The form is not sent to another website.'}</p>
           </section>
         </aside>
       </div>
@@ -130,7 +145,7 @@ function ApplicationForm({ item, user, answers, setAnswers, confirming, setConfi
   if (submitted) {
     return (
       <section className="mt-8 rounded-2xl bg-mint p-4">
-        <h3 className="font-medium">Application confirmed</h3>
+        <h3 className="font-medium">{item.type === 'EVENT' ? 'Registration confirmed' : 'Application confirmed'}</h3>
         <p className="mt-1 text-sm text-ink/70">
           {item.trackingStatus === 'ACCEPTED' && 'The organization accepted your application.'}
           {item.trackingStatus === 'REJECTED' && 'The organization did not accept your application.'}
@@ -150,7 +165,7 @@ function ApplicationForm({ item, user, answers, setAnswers, confirming, setConfi
   }
   return (
     <section className="mt-8">
-      <h3 className="font-display text-2xl">Application</h3>
+      <h3 className="font-display text-2xl">{item.type === 'EVENT' ? 'Registration' : 'Application'}</h3>
       <p className="mt-1 text-sm text-ink/60">Fill the organization’s form, then confirm. Nothing leaves Future Link.</p>
       {!confirming && (
         <div className="mt-4 space-y-4">
@@ -176,11 +191,11 @@ function ApplicationForm({ item, user, answers, setAnswers, confirming, setConfi
             className="rounded-xl bg-brand px-4 py-3 text-white"
             onClick={() => {
               if (!user) return navigate('/login')
-              if (user.role !== 'SEEKER') return setFormError('Sign in as a student to apply.')
+              if (user.role !== 'SEEKER') return setFormError(item.type === 'EVENT' ? 'Sign in as a student to register.' : 'Sign in as a student to apply.')
               if (ready()) setConfirming(true)
             }}
           >
-            Review application
+            {item.type === 'EVENT' ? 'Review registration' : 'Review application'}
           </button>
         </div>
       )}
@@ -199,7 +214,7 @@ function ApplicationForm({ item, user, answers, setAnswers, confirming, setConfi
           <div className="mt-4 flex gap-2">
             <button className="rounded-xl border border-line px-4 py-2" onClick={() => setConfirming(false)}>Back</button>
             <button className="rounded-xl bg-brand px-4 py-3 text-white" disabled={apply.isPending} onClick={() => apply.mutate()}>
-              {apply.isPending ? 'Sending…' : 'Confirm application'}
+              {apply.isPending ? 'Sending…' : (item.type === 'EVENT' ? 'Confirm registration' : 'Confirm application')}
             </button>
           </div>
         </div>

@@ -1,24 +1,12 @@
-const STOP = new Set(['the', 'and', 'for', 'with', 'that', 'this', 'from', 'your', 'into', 'want', 'have', 'will', 'about', 'more'])
-
-function tokens(value) {
-  return new Set(
-    String(value || '')
-      .toLowerCase()
-      .split(/[^a-z0-9+#]+/)
-      .filter((word) => word.length > 2 && !STOP.has(word)),
-  )
+function normalize(value) {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9+#]+/g, ' ').trim()
 }
 
 function includesLoose(haystack, needle) {
-  const left = haystack.toLowerCase()
-  const right = needle.toLowerCase()
-  return left.includes(right) || right.includes(left)
-}
-
-function overlapRatio(required, owned) {
-  if (!required.length) return 0
-  const hits = required.filter((item) => owned.some((ownedItem) => includesLoose(ownedItem, item)))
-  return hits.length / required.length
+  const left = normalize(haystack)
+  const right = normalize(needle)
+  if (!left || !right || right.length < 3) return false
+  return ` ${left} `.includes(` ${right} `) || ` ${right} `.includes(` ${left} `)
 }
 
 export function eligibility(profile, opportunity) {
@@ -64,70 +52,73 @@ export function eligibility(profile, opportunity) {
   return { overall, checks }
 }
 
-export function scoreOpportunity(profile, opportunity) {
-  const skills = profile?.skills || []
-  const interests = profile?.interests || []
-  const required = opportunity.requiredSkills || []
-
-  const skillScore = required.length ? overlapRatio(required, skills) : skills.length ? 0.35 : 0
-
-  const blob = `${opportunity.type} ${opportunity.category} ${opportunity.title} ${opportunity.description}`.toLowerCase()
-  const interestHits = interests.filter((interest) => blob.includes(interest.toLowerCase()))
-  const interestScore = interests.length ? interestHits.length / interests.length : 0
-
-  const goalTokens = tokens(profile?.careerGoals)
-  const listingTokens = tokens(`${opportunity.title} ${opportunity.description} ${opportunity.category} ${opportunity.eligibility}`)
-  let goalHits = 0
-  for (const token of goalTokens) {
-    if (listingTokens.has(token)) goalHits += 1
-  }
-  const goalScore = goalTokens.size ? Math.min(1, goalHits / Math.min(6, goalTokens.size)) : 0
-
-  const level = (profile?.educationLevel || '').toLowerCase()
-  const audience = (opportunity.audience || '').toLowerCase()
-  let educationScore = 0.55
-  if (audience && level && (audience.includes('any') || audience.includes(level))) educationScore = 1
-  else if (audience && level) educationScore = 0.2
-
-  const projectTech = []
+function portfolioTerms(profile) {
+  const terms = [
+    ...(profile?.skills || []),
+    ...(profile?.interests || []),
+    profile?.fieldOfStudy,
+  ]
   for (const project of profile?.projects || []) {
-    if (Array.isArray(project.tech)) projectTech.push(...project.tech)
+    if (Array.isArray(project.tech)) terms.push(...project.tech)
   }
-  const experienceScore = required.length ? overlapRatio(required, projectTech.concat(skills)) : 0.45
+  for (const item of profile?.experiences || []) {
+    terms.push(item.role)
+  }
+  return [...new Set(terms.map((item) => String(item || '').trim()).filter((item) => normalize(item).length >= 3))]
+}
 
-  const locations = (profile?.locations || []).map((item) => item.toLowerCase())
-  const place = (opportunity.location || '').toLowerCase()
-  const modes = profile?.workModes || []
-  let locationScore = 0.5
-  if (opportunity.workMode === 'REMOTE') locationScore = 1
-  else if (locations.some((item) => place.includes(item))) locationScore = 1
-  else if (modes.includes(opportunity.workMode)) locationScore = 0.75
-  else if (!locations.length && !modes.length) locationScore = 0.5
-  else locationScore = 0.25
+function listingText(opportunity) {
+  return [
+    opportunity.title,
+    opportunity.description,
+    opportunity.responsibilities,
+    opportunity.eligibility,
+    opportunity.category,
+    ...(opportunity.requiredSkills || []),
+  ].filter(Boolean).join(' ')
+}
 
-  const score = Math.round(
-    100 *
-      (0.3 * skillScore +
-        0.25 * interestScore +
-        0.15 * goalScore +
-        0.1 * educationScore +
-        0.1 * experienceScore +
-        0.1 * locationScore),
-  )
+export function scoreOpportunity(profile, opportunity) {
+  const required = opportunity.requiredSkills || []
+  const terms = portfolioTerms(profile)
+  const evidence = [
+    profile?.careerGoals,
+    ...(profile?.projects || []).map((project) => `${project.title || ''} ${project.summary || ''}`),
+    ...(profile?.experiences || []).map((item) => item.summary),
+  ].filter(Boolean).join(' ')
+  const listing = listingText(opportunity)
+
+  const matchedSkills = required.filter((item) => (
+    terms.some((term) => includesLoose(term, item)) || includesLoose(evidence, item)
+  ))
+  const mentioned = terms.filter((term) => (
+    includesLoose(listing, term) && !matchedSkills.some((skill) => includesLoose(term, skill))
+  ))
+  const related = matchedSkills.length > 0 || mentioned.length > 0
+
+  let score = 0
+  if (related) {
+    if (required.length) score += 70 * (matchedSkills.length / required.length)
+    else if (matchedSkills.length) score += 55
+    score += Math.min(25, mentioned.length * 10)
+    const level = (profile?.educationLevel || '').toLowerCase()
+    const audience = (opportunity.audience || '').toLowerCase()
+    if (level && audience && (audience.includes('any') || audience.includes(level))) score += 5
+    const locations = (profile?.locations || []).map((item) => item.toLowerCase())
+    const place = (opportunity.location || '').toLowerCase()
+    if (opportunity.workMode === 'REMOTE' || locations.some((item) => item && place.includes(item))) score += 5
+  }
 
   const reasons = []
-  const matchedSkills = required.filter((item) => skills.some((skill) => includesLoose(skill, item)))
   if (matchedSkills.length) reasons.push(matchedSkills.slice(0, 3).join(', '))
-  if (interestHits.length) reasons.push(interestHits.slice(0, 2).join(' + '))
-  if (goalScore >= 0.34) reasons.push('your stated goals')
-
-  const explanation = reasons.length
-    ? `Matched on ${reasons.join(' · ')}.`
-    : 'This listing is open. Add skills and interests so the explanation can name a specific overlap.'
+  if (mentioned.length) reasons.push(mentioned.slice(0, 2).join(', '))
 
   return {
-    score,
-    explanation,
+    score: related ? Math.min(100, Math.round(score)) : 0,
+    related,
+    explanation: related
+      ? `Matched on ${reasons.join(' · ')}.`
+      : 'This opportunity is not related to your portfolio.',
     reasons,
     eligibility: eligibility(profile, opportunity),
   }

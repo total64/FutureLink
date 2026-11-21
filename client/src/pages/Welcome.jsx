@@ -1,11 +1,12 @@
 import { Link, Navigate } from 'react-router-dom'
 import { useAuth } from '../auth'
 import { homeFor } from '../lib/roles'
+import Assistant from '../components/Assistant'
 
 const roles = [
   {
-    title: 'Student',
-    copy: 'Find internships, events, scholarships and a profile that explains why you match.',
+    title: 'Opportunity seeker',
+    copy: 'Find internships and events, and a profile that explains why you match.',
     to: '/register?as=seeker',
   },
   {
@@ -18,7 +19,7 @@ const roles = [
 export default function Welcome() {
   const { user, ready } = useAuth()
   if (!ready) return <p className="p-8">Loading…</p>
-  if (user) return <Navigate to={homeFor(user.role)} replace />
+  if (user) return <Navigate to={homeFor(user)} replace />
 
   return (
     <div className="min-h-screen bg-paper">
@@ -39,10 +40,10 @@ export default function Welcome() {
             <p className="text-xs font-semibold tracking-[0.16em] text-brand">WELCOME TO FUTURE LINK</p>
             <h1 className="mt-3 max-w-xl font-display text-5xl font-semibold leading-tight">Big ambitions. Right opportunities.</h1>
             <p className="mt-4 max-w-lg text-lg text-ink/70">
-              A place for students and organizations to find each other. Open the door, choose your role, and we will take you to the right dashboard.
+              A place for opportunity seekers and organizations to find each other. Open the door, choose your role, and we will take you to the right dashboard.
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
-              <Link to="/register?as=seeker" className="rounded-full bg-brand px-5 py-3 font-medium text-white">Join as a student</Link>
+              <Link to="/register?as=seeker" className="rounded-full bg-brand px-5 py-3 font-medium text-white">Join as an opportunity seeker</Link>
               <Link to="/register?as=provider" className="rounded-full border border-brand px-5 py-3 font-medium text-brand">Join as an organization</Link>
               <Link to="/discover" className="rounded-full px-5 py-3 text-ink/70">Browse first</Link>
             </div>
@@ -75,6 +76,7 @@ export default function Welcome() {
           </div>
         </section>
       </main>
+      <Assistant />
     </div>
   )
 }

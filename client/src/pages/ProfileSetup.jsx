@@ -1,47 +1,85 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import Shell from '../components/Shell'
+import PortfolioView from '../components/PortfolioView'
+import { useAuth } from '../auth'
 import { api } from '../lib/api'
 
-const steps = ['Account', 'Background & skills', 'Projects', 'Review']
-
 const empty = {
+  firstName: '',
+  lastName: '',
+  photoUrl: '',
+  phone: '',
   university: '',
   fieldOfStudy: '',
   educationLevel: 'Undergraduate',
+  location: '',
   skills: [],
   interests: [],
-  careerGoals: '',
-  bio: '',
-  locations: ['Addis Ababa'],
-  workModes: ['HYBRID'],
-  projects: [],
-  visibility: 'private',
+  careerNote: '',
+  projects: [{ title: '', note: '', url: '' }],
+  experiences: [{ role: '', organization: '', note: '' }],
+  certifications: [{ title: '', issuer: '' }],
+  portfolioUrl: '',
+  github: '',
+}
+
+function fromProfile(profile, user) {
+  const notes = profile?.sourceNotes && typeof profile.sourceNotes === 'object' ? profile.sourceNotes : {}
+  const projects = (notes.projects?.length ? notes.projects : profile?.projects || []).map((item) => ({
+    title: item.title || '',
+    note: item.note || item.summary || '',
+    url: item.url || '',
+  }))
+  const experiences = (notes.experiences?.length ? notes.experiences : profile?.experiences || []).map((item) => ({
+    role: item.role || '',
+    organization: item.organization || '',
+    note: item.note || '',
+  }))
+  const certifications = (notes.certifications?.length ? notes.certifications : profile?.certifications || []).map((item) => ({
+    title: item.title || '',
+    issuer: item.issuer || '',
+  }))
+  return {
+    ...empty,
+    firstName: user?.firstName || '',
+    lastName: user?.lastName || '',
+    photoUrl: profile?.photoUrl || '',
+    phone: profile?.phone || '',
+    university: profile?.university || '',
+    fieldOfStudy: profile?.fieldOfStudy || '',
+    educationLevel: profile?.educationLevel || 'Undergraduate',
+    location: profile?.locations?.[0] || '',
+    skills: profile?.skills || [],
+    interests: profile?.interests || [],
+    careerNote: notes.careerNote || '',
+    projects: projects.length ? projects : [{ title: '', note: '', url: '' }],
+    experiences: experiences.length ? experiences : [{ role: '', organization: '', note: '' }],
+    certifications: certifications.length ? certifications : [{ title: '', issuer: '' }],
+    portfolioUrl: profile?.portfolioUrl || '',
+  }
 }
 
 export default function ProfileSetup() {
+  const { user } = useAuth()
   const navigate = useNavigate()
   const client = useQueryClient()
   const query = useQuery({ queryKey: ['profile'], queryFn: () => api('/profile') })
-  const [step, setStep] = useState(1)
   const [form, setForm] = useState(empty)
   const [skill, setSkill] = useState('')
   const [interest, setInterest] = useState('')
-  const [freeText, setFreeText] = useState('')
-  const [suggestion, setSuggestion] = useState(null)
+  const [cvText, setCvText] = useState('')
+  const [githubProjects, setGithubProjects] = useState([])
+  const [stage, setStage] = useState('questions')
+  const [missing, setMissing] = useState([])
+  const [approved, setApproved] = useState(false)
   const [error, setError] = useState('')
-  const [saving, setSaving] = useState(false)
+  const [busy, setBusy] = useState(false)
 
   useEffect(() => {
-    if (query.data) {
-      setForm({
-        ...empty,
-        ...query.data,
-        projects: Array.isArray(query.data.projects) ? query.data.projects : [],
-      })
-    }
-  }, [query.data])
+    if (query.data) setForm(fromProfile(query.data, user))
+  }, [query.data, user])
 
   function addChip(key, value, clear) {
     const next = value.trim()
@@ -50,142 +88,245 @@ export default function ProfileSetup() {
     clear('')
   }
 
-  async function suggest() {
+  function updateList(key, index, field, value) {
+    const items = form[key].map((item, itemIndex) => (itemIndex === index ? { ...item, [field]: value } : item))
+    setForm({ ...form, [key]: items })
+  }
+
+  function applyCv(result) {
+    setForm((current) => ({
+      ...current,
+      university: current.university || result.university || '',
+      educationLevel: result.educationLevel || current.educationLevel,
+      skills: [...new Set([...current.skills, ...(result.skills || [])])].slice(0, 12),
+      interests: [...new Set([...current.interests, ...(result.interests || [])])].slice(0, 12),
+    }))
+  }
+
+  async function readCv() {
     setError('')
     try {
-      const result = await api('/profile/structure', { method: 'POST', body: { text: freeText } })
-      setSuggestion(result)
+      applyCv(await api('/profile/structure', { method: 'POST', body: { text: cvText } }))
     } catch (err) {
       setError(err.message)
     }
   }
 
-  function acceptSuggestion() {
-    if (!suggestion) return
-    setForm((current) => ({
-      ...current,
-      skills: [...new Set([...current.skills, ...suggestion.skills])].slice(0, 12),
-      interests: [...new Set([...current.interests, ...suggestion.interests])].slice(0, 12),
-      university: current.university || suggestion.university,
-      educationLevel: suggestion.educationLevel || current.educationLevel,
-      careerGoals: suggestion.careerGoals || current.careerGoals,
-    }))
-    setSuggestion(null)
+  async function readCvFile(event) {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+    setError('')
+    const pdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
+    if (!pdf) {
+      const reader = new FileReader()
+      reader.onload = () => setCvText(String(reader.result || '').slice(0, 8000))
+      reader.readAsText(file)
+      return
+    }
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer())
+      let binary = ''
+      for (let index = 0; index < bytes.length; index += 0x8000) {
+        binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000))
+      }
+      applyCv(await api('/profile/cv', { method: 'POST', body: { pdf: btoa(binary) } }))
+    } catch (err) {
+      setError(err.message)
+    }
   }
 
-  async function save(goPortfolio) {
-    setSaving(true)
+  async function loadGithub() {
     setError('')
     try {
-      await api('/profile', { method: 'PUT', body: form })
+      const result = await api('/profile/github', { method: 'POST', body: { username: form.github } })
+      setGithubProjects(result.projects || [])
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  function addGithubProject(project) {
+    setForm((current) => ({
+      ...current,
+      projects: [...current.projects.filter((item) => item.title), { title: project.title, note: project.note, url: project.url || '' }],
+    }))
+  }
+
+  async function generate() {
+    setBusy(true)
+    setError('')
+    try {
+      const result = await api('/profile/generate', {
+        method: 'POST',
+        body: {
+          firstName: form.firstName,
+          lastName: form.lastName,
+          photoUrl: form.photoUrl,
+          phone: form.phone,
+          university: form.university,
+          fieldOfStudy: form.fieldOfStudy,
+          educationLevel: form.educationLevel,
+          skills: form.skills,
+          interests: form.interests,
+          careerNote: form.careerNote,
+          projects: form.projects.filter((item) => item.title.trim()),
+          experiences: form.experiences.filter((item) => item.role.trim() || item.organization.trim()),
+          certifications: form.certifications.filter((item) => item.title.trim()),
+          portfolioUrl: form.portfolioUrl,
+          locations: form.location.trim() ? [form.location.trim()] : [],
+        },
+      })
+      setMissing(result.missing || [])
+      setApproved(false)
       await client.invalidateQueries({ queryKey: ['profile'] })
-      if (goPortfolio) navigate('/portfolio')
-      else setStep((value) => Math.min(3, value + 1))
+      setStage('review')
     } catch (err) {
       setError(err.message)
     } finally {
-      setSaving(false)
+      setBusy(false)
     }
   }
 
-  return (
-    <Shell crumb="Profile setup">
-      <h1 className="font-display text-4xl">Your next chapter starts with you.</h1>
-      <p className="mt-2 max-w-2xl text-ink/70">Tell us what you’re learning, what you’re good at and where you want to go. Suggestions are never saved until you confirm them.</p>
-      <ol className="mt-6 flex flex-wrap gap-3 text-sm">
-        {steps.map((label, index) => (
-          <li key={label} className={`rounded-full px-3 py-1 ${step === index ? 'bg-brand text-white' : 'bg-white text-ink/60'}`}>{index + 1}. {label}</li>
-        ))}
-      </ol>
+  async function chooseTemplate(template) {
+    await api('/profile', { method: 'PUT', body: { template } })
+    await client.invalidateQueries({ queryKey: ['profile'] })
+  }
 
-      {step === 1 && (
-        <section className="mt-6 grid gap-6 lg:grid-cols-[1fr_280px]">
+  async function publish() {
+    setBusy(true)
+    setError('')
+    try {
+      const saved = await api('/profile/publish', { method: 'POST', body: { approved } })
+      await client.invalidateQueries({ queryKey: ['profile'] })
+      navigate(`/portfolio/${saved.slug}`)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const profile = query.data
+
+  return (
+    <Shell crumb="Build my portfolio">
+      <h1 className="font-display text-4xl">Build my portfolio with AI</h1>
+      <p className="mt-2 max-w-2xl text-ink/70">Provide what you have actually done. The builder organizes it and improves the wording. It does not invent experience. You approve it before anyone else can see it.</p>
+
+      {stage === 'questions' && (
+        <section className="mt-6 space-y-6">
           <div className="rounded-3xl border border-line bg-white p-6">
-            <h2 className="font-display text-2xl">Background & skills</h2>
+            <h2 className="font-display text-2xl">Personal information</h2>
             <div className="mt-4 grid gap-4 sm:grid-cols-2">
+              <label className="block"><span className="label">First name</span><input className="field" value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} /></label>
+              <label className="block"><span className="label">Last name</span><input className="field" value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} /></label>
+              <label className="block sm:col-span-2"><span className="label">Profile picture link</span><input className="field" value={form.photoUrl} placeholder="https://..." onChange={(e) => setForm({ ...form, photoUrl: e.target.value })} /></label>
+              <label className="block"><span className="label">Phone</span><input className="field" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></label>
+              <label className="block"><span className="label">Email</span><input className="field" value={user?.email || ''} disabled /></label>
               <label className="block"><span className="label">University</span><input className="field" value={form.university} onChange={(e) => setForm({ ...form, university: e.target.value })} /></label>
               <label className="block"><span className="label">Education level</span>
                 <select className="field" value={form.educationLevel} onChange={(e) => setForm({ ...form, educationLevel: e.target.value })}>
                   {['Undergraduate', 'Graduate', 'Diploma', 'High school'].map((level) => <option key={level}>{level}</option>)}
                 </select>
               </label>
-              <label className="block sm:col-span-2"><span className="label">Field of study</span><input className="field" value={form.fieldOfStudy} onChange={(e) => setForm({ ...form, fieldOfStudy: e.target.value })} /></label>
+              <label className="block"><span className="label">Field of study</span><input className="field" value={form.fieldOfStudy} onChange={(e) => setForm({ ...form, fieldOfStudy: e.target.value })} /></label>
+              <label className="block"><span className="label">Where are you based?</span><input className="field" value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} /></label>
             </div>
-            <ChipEditor label="Skills" items={form.skills} value={skill} setValue={setSkill} onAdd={() => addChip('skills', skill, setSkill)} onRemove={(item) => setForm({ ...form, skills: form.skills.filter((skillName) => skillName !== item) })} />
-            <ChipEditor label="Interests" items={form.interests} value={interest} setValue={setInterest} onAdd={() => addChip('interests', interest, setInterest)} onRemove={(item) => setForm({ ...form, interests: form.interests.filter((name) => name !== item) })} />
-            <label className="mt-4 block"><span className="label">What are you working toward?</span>
-              <textarea className="field min-h-28" value={form.careerGoals} onChange={(e) => setForm({ ...form, careerGoals: e.target.value })} />
+            <ChipEditor label="Technical skills" items={form.skills} value={skill} setValue={setSkill} onAdd={() => addChip('skills', skill, setSkill)} onRemove={(item) => setForm({ ...form, skills: form.skills.filter((name) => name !== item) })} />
+            <ChipEditor label="Career interests" items={form.interests} value={interest} setValue={setInterest} onAdd={() => addChip('interests', interest, setInterest)} onRemove={(item) => setForm({ ...form, interests: form.interests.filter((name) => name !== item) })} />
+            <label className="mt-4 block"><span className="label">Short note about the work you want</span>
+              <textarea className="field min-h-24" value={form.careerNote} onChange={(e) => setForm({ ...form, careerNote: e.target.value })} />
             </label>
-            <label className="mt-4 block"><span className="label">Or paste a short bio and let Future Link suggest fields</span>
-              <textarea className="field min-h-24" value={freeText} onChange={(e) => setFreeText(e.target.value)} placeholder="I’m an undergraduate at Addis Ababa University studying Computer Science. I use Figma and care about social impact." />
-            </label>
-            <button type="button" className="mt-3 rounded-xl border border-brand px-4 py-2 text-sm" onClick={suggest}>Suggest from this text</button>
-            {suggestion && (
-              <div className="mt-4 rounded-2xl bg-mint p-4 text-sm">
-                <p className="font-medium">Review this suggestion</p>
-                <p className="mt-1">Skills: {suggestion.skills.join(', ') || 'none found'}</p>
-                <p>Interests: {suggestion.interests.join(', ') || 'none found'}</p>
-                <p className="mt-1 text-ink/60">{suggestion.note}</p>
-                <div className="mt-3 flex gap-2">
-                  <button type="button" className="rounded-lg bg-brand px-3 py-1.5 text-white" onClick={acceptSuggestion}>Accept</button>
-                  <button type="button" className="rounded-lg border border-line px-3 py-1.5" onClick={() => setSuggestion(null)}>Reject</button>
-                </div>
-              </div>
-            )}
           </div>
-          <aside className="rounded-3xl bg-brand p-5 text-white">
-            <h3 className="font-display text-2xl">A profile with purpose.</h3>
-            <p className="mt-3 text-sm text-white/75">Your background becomes more than a form. Future Link turns confirmed details into a story you can review and edit.</p>
-          </aside>
-        </section>
-      )}
 
-      {step === 2 && (
-        <section className="mt-6 rounded-3xl border border-line bg-white p-6">
-          <h2 className="font-display text-2xl">Projects</h2>
-          {form.projects.map((project, index) => (
-            <div key={`${project.title}-${index}`} className="mt-4 grid gap-3 sm:grid-cols-2">
-              <input className="field" value={project.title} onChange={(e) => {
-                const projects = [...form.projects]
-                projects[index] = { ...project, title: e.target.value }
-                setForm({ ...form, projects })
-              }} />
-              <input className="field" value={project.summary || ''} placeholder="Short summary" onChange={(e) => {
-                const projects = [...form.projects]
-                projects[index] = { ...project, summary: e.target.value }
-                setForm({ ...form, projects })
-              }} />
+          <div className="rounded-3xl border border-line bg-white p-6">
+            <h2 className="font-display text-2xl">Experience and projects</h2>
+            <label className="mt-4 block"><span className="label">Paste CV text</span>
+              <textarea className="field min-h-24" value={cvText} onChange={(e) => setCvText(e.target.value)} placeholder="Or paste the text of your CV." />
+            </label>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <input type="file" accept="application/pdf,.pdf,.txt,text/plain" onChange={readCvFile} />
+              <button type="button" className="rounded-xl border border-brand px-4 py-2 text-sm" onClick={readCv}>Read this CV</button>
             </div>
-          ))}
-          <button type="button" className="mt-4 text-sm underline" onClick={() => setForm({ ...form, projects: [...form.projects, { title: '', summary: '', tech: [] }] })}>
-            Add a project
-          </button>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <input className="field max-w-xs" value={form.github} placeholder="GitHub username" onChange={(e) => setForm({ ...form, github: e.target.value })} />
+              <button type="button" className="rounded-xl border border-line px-4 py-2 text-sm" onClick={loadGithub}>Read public repositories</button>
+            </div>
+            {githubProjects.length > 0 && (
+              <ul className="mt-3 space-y-2">
+                {githubProjects.map((project) => (
+                  <li key={project.title} className="flex items-center justify-between gap-3 rounded-2xl bg-paper px-3 py-2 text-sm">
+                    <span>{project.title}</span>
+                    <button type="button" className="text-brand" onClick={() => addGithubProject(project)}>Add</button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <h3 className="mt-5 font-medium">Projects</h3>
+            {form.projects.map((project, index) => (
+              <div key={index} className="mt-3 grid gap-3 sm:grid-cols-3">
+                <input className="field" value={project.title} placeholder="Project name" onChange={(e) => updateList('projects', index, 'title', e.target.value)} />
+                <input className="field" value={project.note} placeholder="What it does" onChange={(e) => updateList('projects', index, 'note', e.target.value)} />
+                <input className="field" value={project.url || ''} placeholder="Project link" onChange={(e) => updateList('projects', index, 'url', e.target.value)} />
+              </div>
+            ))}
+            <button type="button" className="mt-3 text-sm underline" onClick={() => setForm({ ...form, projects: [...form.projects, { title: '', note: '', url: '' }] })}>Add a project</button>
+            <h3 className="mt-5 font-medium">Internships and work</h3>
+            {form.experiences.map((item, index) => (
+              <div key={index} className="mt-3 grid gap-3 sm:grid-cols-3">
+                <input className="field" value={item.role} placeholder="Role" onChange={(e) => updateList('experiences', index, 'role', e.target.value)} />
+                <input className="field" value={item.organization} placeholder="Organization" onChange={(e) => updateList('experiences', index, 'organization', e.target.value)} />
+                <input className="field" value={item.note} placeholder="What you did" onChange={(e) => updateList('experiences', index, 'note', e.target.value)} />
+              </div>
+            ))}
+            <button type="button" className="mt-3 text-sm underline" onClick={() => setForm({ ...form, experiences: [...form.experiences, { role: '', organization: '', note: '' }] })}>Add experience</button>
+            <h3 className="mt-5 font-medium">Certificates</h3>
+            {form.certifications.map((item, index) => (
+              <div key={index} className="mt-3 grid gap-3 sm:grid-cols-2">
+                <input className="field" value={item.title} placeholder="Certificate" onChange={(e) => updateList('certifications', index, 'title', e.target.value)} />
+                <input className="field" value={item.issuer} placeholder="Issuer" onChange={(e) => updateList('certifications', index, 'issuer', e.target.value)} />
+              </div>
+            ))}
+            <button type="button" className="mt-3 text-sm underline" onClick={() => setForm({ ...form, certifications: [...form.certifications, { title: '', issuer: '' }] })}>Add a certificate</button>
+            <label className="mt-5 block"><span className="label">Another portfolio or GitHub link</span>
+              <input className="field" value={form.portfolioUrl} placeholder="https://github.com/your-name" onChange={(e) => setForm({ ...form, portfolioUrl: e.target.value })} />
+            </label>
+          </div>
+          {error && <p className="text-sm text-red-700">{error}</p>}
+          <button className="rounded-xl bg-brand px-4 py-2 text-white" disabled={busy} onClick={generate}>{busy ? 'Generating…' : 'Generate portfolio'}</button>
         </section>
       )}
 
-      {step === 3 && (
-        <section className="mt-6 rounded-3xl border border-line bg-white p-6">
-          <h2 className="font-display text-2xl">Review</h2>
-          <p className="mt-3 text-ink/80">{form.fieldOfStudy} · {form.educationLevel} · {form.university}</p>
-          <p className="mt-2 text-sm">Skills: {form.skills.join(', ') || 'None yet'}</p>
-          <p className="mt-1 text-sm">Interests: {form.interests.join(', ') || 'None yet'}</p>
-          <p className="mt-3 text-sm leading-6">{form.careerGoals}</p>
-          <label className="mt-5 flex items-center justify-between gap-4 rounded-2xl bg-paper p-4">
-            <span>
-              <span className="block font-medium">Appear in talent discovery</span>
-              <span className="text-sm text-ink/60">Off by default. Verified organizations can see a limited summary only if you turn this on.</span>
-            </span>
-            <input type="checkbox" checked={form.visibility === 'discoverable'} onChange={(e) => setForm({ ...form, visibility: e.target.checked ? 'discoverable' : 'private' })} />
+      {stage === 'review' && profile && (
+        <section className="mt-6 space-y-4">
+          {missing.length > 0 && (
+            <div className="rounded-3xl bg-amber-50 p-5 text-sm text-amber-950">
+              <p className="font-medium">Still missing, if you have it</p>
+              <ul className="mt-2 list-disc pl-5">
+                {missing.map((item) => <li key={item}>{item}</li>)}
+              </ul>
+              <button type="button" className="mt-3 underline" onClick={() => setStage('questions')}>Add the missing information</button>
+            </div>
+          )}
+          <div className="flex flex-wrap gap-2">
+            {['modern', 'minimal', 'professional', 'creative'].map((template) => (
+              <button key={template} type="button" className={`rounded-full px-4 py-2 text-sm capitalize ${profile.template === template ? 'bg-brand text-white' : 'bg-white'}`} onClick={() => chooseTemplate(template)}>{template}</button>
+            ))}
+          </div>
+          <PortfolioView profile={profile} name={`${form.firstName} ${form.lastName}`.trim()} email={user?.email} />
+          <label className="flex items-start gap-3 rounded-2xl bg-white p-4 text-sm">
+            <input type="checkbox" checked={approved} onChange={(e) => setApproved(e.target.checked)} />
+            <span>I approve this portfolio. Publishing makes my name, story, projects, and contact details visible at a public link.</span>
           </label>
+          {error && <p className="text-sm text-red-700">{error}</p>}
+          <div className="flex flex-wrap gap-3">
+            <button type="button" className="rounded-xl border border-line bg-white px-4 py-2" onClick={() => setStage('questions')}>Edit answers</button>
+            <button type="button" className="rounded-xl bg-brand px-4 py-2 text-white" disabled={!approved || busy} onClick={publish}>{busy ? 'Publishing…' : 'Publish'}</button>
+            <Link to="/portfolio" className="rounded-xl border border-line bg-white px-4 py-2">Preview privately</Link>
+          </div>
         </section>
       )}
-
-      {error && <p className="mt-4 text-sm text-red-700">{error}</p>}
-      <div className="mt-6 flex gap-3">
-        {step > 1 && <button className="rounded-xl border border-line bg-white px-4 py-2" onClick={() => setStep((value) => value - 1)}>Back</button>}
-        {step < 3 && <button className="rounded-xl bg-brand px-4 py-2 text-white" disabled={saving} onClick={() => save(false)}>{saving ? 'Saving…' : 'Save and continue'}</button>}
-        {step === 3 && <button className="rounded-xl bg-brand px-4 py-2 text-white" disabled={saving} onClick={() => save(true)}>{saving ? 'Saving…' : 'Save portfolio'}</button>}
-      </div>
     </Shell>
   )
 }
@@ -199,9 +340,7 @@ function ChipEditor({ label, items, value, setValue, onAdd, onRemove }) {
         <button type="button" className="rounded-xl border border-line px-3" onClick={onAdd}>Add</button>
       </div>
       <div className="mt-2 flex flex-wrap gap-2">
-        {items.map((item) => (
-          <button type="button" key={item} className="rounded-full bg-paper px-3 py-1 text-sm" onClick={() => onRemove(item)}>{item} ×</button>
-        ))}
+        {items.map((item) => <button type="button" key={item} className="rounded-full bg-paper px-3 py-1 text-sm" onClick={() => onRemove(item)}>{item} ×</button>)}
       </div>
     </div>
   )

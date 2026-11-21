@@ -42,6 +42,11 @@ export default function Saved({ mode = 'saved' }) {
             <div>
               <Link to={`/opportunities/${item.opportunity.id}`} className="font-medium">{item.opportunity.title}</Link>
               <p className="text-sm text-ink/60">{item.opportunity.organization?.name} · Closes {formatDate(item.opportunity.closesAt)}</p>
+              {item.reminder && (
+                <p className={`mt-2 inline-flex rounded-full px-3 py-1 text-sm ${item.reminder.level === 'passed' ? 'bg-paper text-ink/70' : item.reminder.level === 'upcoming' ? 'bg-paper text-ink/70' : 'bg-amber-50 text-amber-950'}`}>
+                  {item.reminder.label}
+                </p>
+              )}
             </div>
             <div className="flex items-center gap-2">
               {mode === 'applications' ? (

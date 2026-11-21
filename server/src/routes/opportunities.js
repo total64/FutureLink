@@ -7,13 +7,17 @@ import { optionalAuth, requireAuth } from '../middleware/auth.js'
 import { validate } from '../middleware/validate.js'
 import { scoreOpportunity } from '../services/recommend.js'
 import { closeExpired, openWhere } from '../lib/deadline.js'
+import { LIVE_TYPES } from '../services/plans.js'
 import { applicationFields, checkAnswers } from '../lib/applicationForm.js'
+import { clusterHeld, haversine, nearestCity } from '../lib/places.js'
 
 const listSchema = z.object({
   query: z.object({
     q: z.string().optional(),
     type: z.string().optional(),
     location: z.string().optional(),
+    held: z.string().optional(),
+    near: z.string().optional(),
     workMode: z.string().optional(),
     deadline: z.enum(['any', 'week', 'month']).optional(),
     audience: z.string().optional(),
@@ -23,13 +27,33 @@ const listSchema = z.object({
   }),
 })
 
+function parseNear(value) {
+  const [lat, lng] = String(value || '').split(',').map((item) => Number(item))
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null
+  return { lat, lng }
+}
+
+function withinNear(row, near, radiusKm = 20) {
+  if (!near) return true
+  const stored = row.latitude != null && row.longitude != null
+  const lat = stored ? row.latitude : null
+  const lng = stored ? row.longitude : null
+  if (lat == null || lng == null) {
+    const city = nearestCity(near.lat, near.lng, radiusKm)
+    return Boolean(city && String(row.location || '').toLowerCase().includes(city.name.toLowerCase()))
+  }
+  return haversine(near.lat, near.lng, lat, lng) <= radiusKm
+}
+
 function whereFromQuery(query, now = new Date()) {
   const where = {
     ...openWhere(now),
     AND: [],
   }
-  if (query.type && query.type !== 'ALL') where.type = query.type
-  if (query.location) where.location = { contains: query.location, mode: 'insensitive' }
+  if (LIVE_TYPES.includes(query.type)) where.type = query.type
+  if (!query.near && query.location) where.location = { equals: query.location.trim(), mode: 'insensitive' }
+  else if (!query.near && query.held) where.location = { contains: query.held.trim(), mode: 'insensitive' }
   if (query.workMode) where.workMode = query.workMode
   if (query.audience) where.audience = { contains: query.audience, mode: 'insensitive' }
   if (query.q) {
@@ -66,25 +90,29 @@ opportunityRouter.get('/', optionalAuth, validate(listSchema), async (req, res, 
     const now = new Date()
     await closeExpired(now)
     const where = whereFromQuery(query, now)
+    const near = parseNear(query.near)
     const orderBy = query.sort === 'closing'
       ? [{ closesAt: 'asc' }]
       : [{ createdAt: 'desc' }]
 
-    const [total, rows, profile] = await Promise.all([
+    const [counted, found, profile] = await Promise.all([
       prisma.opportunity.count({ where }),
       prisma.opportunity.findMany({
         where,
         include: { org: true },
         orderBy,
-        take: query.sort === 'match' ? 100 : limit,
-        skip: query.sort === 'match' ? 0 : (page - 1) * limit,
+        take: near || query.sort === 'match' ? 200 : limit,
+        skip: near || query.sort === 'match' ? 0 : (page - 1) * limit,
       }),
       loadProfile(req.auth?.sub),
     ])
+    const rows = near ? found.filter((row) => withinNear(row, near)) : found
+    const total = near ? rows.length : counted
 
     let items = rows.map((row) => {
       const match = profile ? scoreOpportunity(profile, row) : null
-      return publicOpportunity(row, match ? {
+      return publicOpportunity(row, match?.related ? {
+        related: true,
         matchScore: match.score,
         explanation: match.explanation,
       } : {})
@@ -108,28 +136,78 @@ opportunityRouter.get('/', optionalAuth, validate(listSchema), async (req, res, 
   }
 })
 
-opportunityRouter.get('/recommendations', requireAuth, async (req, res, next) => {
+opportunityRouter.get('/places', async (req, res, next) => {
   try {
-    const profile = await prisma.profile.findUnique({ where: { userId: req.auth.sub } })
     const now = new Date()
     await closeExpired(now)
     const rows = await prisma.opportunity.findMany({
       where: openWhere(now),
+      select: { location: true, type: true, latitude: true, longitude: true },
+    })
+    const map = new Map()
+    for (const row of rows) {
+      const location = String(row.location || '').trim()
+      if (!location) continue
+      const key = location.toLowerCase()
+      const current = map.get(key) || { location, internships: 0, events: 0 }
+      if (row.type === 'EVENT') current.events += 1
+      else current.internships += 1
+      map.set(key, current)
+    }
+    const places = [...map.values()].sort((left, right) => left.location.localeCompare(right.location))
+    return ok(res, { places, ...clusterHeld(rows) })
+  } catch (error) {
+    next(error)
+  }
+})
+
+opportunityRouter.get('/recommendations', requireAuth, async (req, res, next) => {
+  try {
+    const profile = await prisma.profile.findUnique({ where: { userId: req.auth.sub } })
+    const place = String(req.query.location || '').trim()
+    const held = String(req.query.held || '').trim()
+    const near = parseNear(req.query.near)
+    const now = new Date()
+    await closeExpired(now)
+    const found = await prisma.opportunity.findMany({
+      where: {
+        ...openWhere(now),
+        ...(near ? {} : place
+          ? { location: { equals: place, mode: 'insensitive' } }
+          : held
+            ? { location: { contains: held, mode: 'insensitive' } }
+            : {}),
+      },
       include: { org: true },
       take: 100,
     })
+    const rows = near ? found.filter((row) => withinNear(row, near)) : found
     const ranked = rows
-      .map((row) => {
-        const match = scoreOpportunity(profile || {}, row)
-        return publicOpportunity(row, {
-          matchScore: match.score,
-          explanation: match.explanation,
-          eligibilityChecks: match.eligibility.checks,
-        })
-      })
+      .map((row) => ({ row, match: scoreOpportunity(profile || {}, row) }))
+      .filter((item) => item.match.related)
+      .map(({ row, match }) => publicOpportunity(row, {
+        related: true,
+        matchScore: match.score,
+        explanation: match.explanation,
+        eligibilityChecks: match.eligibility.checks,
+      }))
       .sort((a, b) => b.matchScore - a.matchScore)
       .slice(0, 12)
     return ok(res, { items: ranked, profileReady: Boolean(profile && profile.completeness >= 40) })
+  } catch (error) {
+    next(error)
+  }
+})
+
+opportunityRouter.get('/nearest', async (req, res, next) => {
+  try {
+    const lat = Number(req.query.lat)
+    const lng = Number(req.query.lng)
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      return fail(res, 400, 'VALIDATION', 'Choose a point on the map.')
+    }
+    const city = nearestCity(lat, lng)
+    return ok(res, { name: city?.name || '' })
   } catch (error) {
     next(error)
   }
@@ -154,8 +232,9 @@ opportunityRouter.get('/:id', optionalAuth, async (req, res, next) => {
       })
     }
     return ok(res, publicOpportunity({ ...row, viewCount: row.viewCount + 1 }, {
-      matchScore: match?.score ?? null,
-      explanation: match?.explanation ?? null,
+      related: match ? match.related : null,
+      matchScore: match?.related ? match.score : null,
+      explanation: match?.related ? match.explanation : (match ? 'This opportunity is not related to your portfolio.' : null),
       eligibilityChecks: match?.eligibility.checks ?? [],
       saved: Boolean(saved),
       trackingStatus: saved?.trackingStatus ?? null,

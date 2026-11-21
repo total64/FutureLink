@@ -14,12 +14,13 @@ export function AdminDashboard() {
     ['Published listings', data.listings],
     ['Restricted content', data.restricted],
     ['Banned accounts', data.banned],
+    ['Payments to confirm', data.pendingPayments],
   ] : []
   return (
     <Shell crumb="Admin">
       <p className="text-xs tracking-[0.16em] text-ink/50">ADMIN DASHBOARD</p>
       <h1 className="mt-2 font-display text-4xl">Platform overview</h1>
-      <p className="mt-2 max-w-2xl text-ink/70">Approve organization accounts here. Tech listings go live without a second approval. Community-restricted content is held for you to ban.</p>
+      <p className="mt-2 max-w-2xl text-ink/70">Approve organization accounts, then confirm paid subscriptions. Internships and events go live within the plan the organization chose.</p>
       {query.isLoading && <p className="mt-6">Loading…</p>}
       {query.error && <p className="mt-6 text-sm text-red-700">{query.error.message}</p>}
       <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -186,6 +187,46 @@ export function AdminContent() {
           </li>
         ))}
         {!query.isLoading && (query.data?.items || []).length === 0 && <li className="text-ink/60">No restricted listings are waiting.</li>}
+      </ul>
+    </Shell>
+  )
+}
+
+export function AdminPayments() {
+  const client = useQueryClient()
+  const query = useQuery({ queryKey: ['admin-payments'], queryFn: () => api('/admin/payments') })
+  const review = useMutation({
+    mutationFn: ({ id, status }) => api(`/admin/payments/${id}/review`, { method: 'POST', body: { status } }),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: ['admin-payments'] })
+      client.invalidateQueries({ queryKey: ['admin-dashboard'] })
+    },
+  })
+  return (
+    <Shell crumb="Payments">
+      <h1 className="font-display text-4xl">Subscription payments</h1>
+      <p className="mt-2 max-w-2xl text-ink/70">Confirm a bank transfer or Telebirr reference to activate Basic or Premium. Reject it if the payment does not match.</p>
+      {review.error && <p className="mt-4 text-sm text-red-700">{review.error.message}</p>}
+      <ul className="mt-6 space-y-3">
+        {(query.data?.items || []).map((item) => (
+          <li key={item.id} className="rounded-2xl border border-line bg-white p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="font-medium">{item.org.name}</p>
+                <p className="text-sm text-ink/60">{item.plan} · {item.billingPeriod.toLowerCase()} · {item.amount} {item.currency}</p>
+                <p className="text-sm text-ink/60">{item.method} · {item.payerName} · {item.reference}</p>
+                <p className="mt-1 text-sm">Payment {item.status.toLowerCase()} · submitted {formatDate(item.createdAt)}</p>
+              </div>
+              {item.status === 'PENDING' && (
+                <div className="flex gap-2">
+                  <button className="rounded-xl bg-brand px-3 py-2 text-sm text-white" disabled={review.isPending} onClick={() => review.mutate({ id: item.id, status: 'VERIFIED' })}>Confirm payment</button>
+                  <button className="rounded-xl border border-line px-3 py-2 text-sm" disabled={review.isPending} onClick={() => review.mutate({ id: item.id, status: 'REJECTED' })}>Reject</button>
+                </div>
+              )}
+            </div>
+          </li>
+        ))}
+        {!query.isLoading && (query.data?.items || []).length === 0 && <li className="text-ink/60">No subscription payments yet.</li>}
       </ul>
     </Shell>
   )
